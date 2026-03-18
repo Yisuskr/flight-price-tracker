@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Flight Price Tracker — User Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# Edit the values below to match your travel plans and alert preferences.
+# Secrets (API key, email password) go in .env — NOT here.
+
+# ---------------------------------------------------------------------------
+# Alert destination
+# ---------------------------------------------------------------------------
+# The email address that will receive price drop notifications.
+alert_email: "your@email.com"
+
+# ---------------------------------------------------------------------------
+# Price threshold
+# ---------------------------------------------------------------------------
+# You will receive an email alert when the cheapest found price is at or
+# below this value (in USD).
+price_threshold_usd: 600
+
+# ---------------------------------------------------------------------------
+# Travel dates
+# ---------------------------------------------------------------------------
+# Format: YYYY-MM-DD
+outbound_date: "2026-06-15"
+
+# Leave blank (null) for a one-way search, or set a return date for
+# round-trip pricing.
+return_date: "2026-06-30"
+
+# ---------------------------------------------------------------------------
+# Search parameters
+# ---------------------------------------------------------------------------
+origin: "MIA"           # Miami International Airport
+destination: "TFS"      # Tenerife South (Reina Sofia). Use TFN for Tenerife North.
+adults: 1
+currency: "USD"
+
+# ---------------------------------------------------------------------------
+# Monitoring settings
+# ---------------------------------------------------------------------------
+# How often to query Google Flights (in hours).
+# SerpAPI free tier: 100 searches/month → ~every 7h uses ~100/month.
+# Recommended: 6 (checks ~4x per day, uses ~120/month on free tier).
+check_interval_hours: 6
+
+# Maximum number of alert emails per day to avoid inbox flooding.
+# Once the threshold is crossed, you'll get at most this many emails/day.
+max_alerts_per_day: 3
+
+# ---------------------------------------------------------------------------
+# SMTP settings (Gmail defaults — no need to change for Gmail users)
+# ---------------------------------------------------------------------------
+smtp_host: "smtp.gmail.com"
+smtp_port: 587
