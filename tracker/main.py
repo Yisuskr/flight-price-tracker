@@ -188,10 +188,12 @@ def evaluate_and_alert(
         )
         notifier.send_alert_batch(results, alerts_to_send, threshold)
     else:
+        # Siempre manda el resumen aunque nada baje del umbral
         logger.info(
-            "El más barato es %s%s, por encima del umbral %s%s. Sin alerta.",
+            "El más barato es %s%s, por encima del umbral %s%s. Enviando resumen...",
             sym, f"{results[0].price:.0f}", sym, f"{threshold:.0f}",
         )
+        notifier.send_alert_batch(results, [], threshold)
 
     logger.info(
         "=== [%s] Ciclo completo — %d resultados fusionados ===",
@@ -309,22 +311,18 @@ def main() -> None:
         google_h, kiwi_h, sky_h, avia_h,
     )
 
-    # Primer ciclo inmediato al arrancar
-    run_google(cfg, conn, notifier)
-    run_kiwi(cfg, conn, notifier)
-    run_skyscanner(cfg, conn, notifier)
-    run_aviasales(cfg, conn, notifier)
+    # NO ejecutamos ciclo inmediato al arrancar — los emails llegan a horas fijas
+    # (06:00 y 18:00 hora España)
 
-    # Programar ciclos recurrentes independientes
-    schedule.every(google_h).hours.do(run_google, cfg, conn, notifier)
+    # ── Programar ciclos a horas fijas (UTC) ──────────────────────────────
+    # España = UTC+2 (verano) → 06:00 ES = 04:00 UTC, 18:00 ES = 16:00 UTC
+    schedule.every().day.at("04:00").do(run_google, cfg, conn, notifier)
+    schedule.every().day.at("16:00").do(run_google, cfg, conn, notifier)
+    schedule.every().day.at("04:05").do(run_aviasales, cfg, conn, notifier)
     schedule.every(kiwi_h).hours.do(run_kiwi, cfg, conn, notifier)
     schedule.every(sky_h).hours.do(run_skyscanner, cfg, conn, notifier)
-    schedule.every(avia_h).hours.do(run_aviasales, cfg, conn, notifier)
 
-    logger.info(
-        "Próximos checks → Google en %dh | Kiwi en %dh | Skyscanner en %dh | Aviasales en %dh",
-        google_h, kiwi_h, sky_h, avia_h,
-    )
+    logger.info("Próximos checks → Google: 06:00 y 18:00 ES | Aviasales: 06:00 ES")
 
     try:
         while True:
