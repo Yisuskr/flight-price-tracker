@@ -49,21 +49,31 @@ logger = logging.getLogger("tracker.main")
 # ---------------------------------------------------------------------------
 # Base de datos
 # ---------------------------------------------------------------------------
-def _resolve_db_path() -> Path:
-    """Use /tmp if the preferred data/ directory can't be created (e.g. Render free tier)."""
-    preferred = Path(__file__).parent.parent / "data"
-    try:
-        preferred.mkdir(parents=True, exist_ok=True)
-        return preferred / "prices.db"
-    except OSError:
-        return Path("/tmp/prices.db")
-
-DB_PATH = _resolve_db_path()
+def _resolve_db_path() -> str:
+    """
+    Try writable locations in order. Fall back to in-memory DB (':memory:')
+    if nothing is writable (e.g. Render free tier with no disk).
+    """
+    candidates = [
+        Path(__file__).parent.parent / "data" / "prices.db",
+        Path("/tmp/prices.db"),
+    ]
+    for path in candidates:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # Test that we can actually write there
+            test = path.parent / ".write_test"
+            test.touch()
+            test.unlink()
+            return str(path)
+        except OSError:
+            continue
+    return ":memory:"
 
 
 def init_db() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    db_path = _resolve_db_path()
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS price_history (
@@ -85,7 +95,7 @@ def init_db() -> sqlite3.Connection:
         """
     )
     conn.commit()
-    logger.info("Base de datos lista en %s", DB_PATH)
+    logger.info("Base de datos lista en %s", db_path)
     return conn
 
 
