@@ -14,7 +14,7 @@ alert_email: "recipient@example.com"
 # ---------------------------------------------------------------------------
 # Recibirás una alerta cuando el precio más barato encontrado sea <= este valor (en EUR).
 # Este precio es por persona, ida y vuelta, sin equipaje.
-price_threshold_usd: 700
+price_threshold_usd: 650
 
 # ---------------------------------------------------------------------------
 # Fechas de viaje — el tracker probará TODAS las combinaciones posibles
@@ -52,15 +52,18 @@ checked_bags: 0
 # para respetar los límites gratuitos de cada API.
 #
 #   SerpAPI (Google Flights): 100 llamadas/mes gratis
-#     → cada 12h usa ~240/mes (se agota a mitad de mes, luego solo Kiwi/Sky)
+#     → cada 12h usa ~240/mes (se agota a mitad de mes, luego solo Kiwi/Sky/Avia)
 #   Kiwi.com: 500 llamadas/mes gratis
 #     → cada 60h usa ~96/mes ✅
 #   Skyscanner (RapidAPI): ~100 llamadas/mes gratis
 #     → cada 72h usa ~80/mes ✅
+#   Aviasales (Travelpayouts): sin límite declarado (~1000 req/h)
+#     → cada 24h, la caché se actualiza ~cada 48h ✅
 #
 check_interval_hours: 12        # Google Flights (SerpAPI)
 kiwi_interval_hours: 60         # Kiwi.com (Tequila API)
 skyscanner_interval_hours: 72   # Skyscanner (RapidAPI)
+aviasales_interval_hours: 24    # Aviasales (Travelpayouts)
 
 # Máximo de emails de alerta al día para no saturar el buzón.
 max_alerts_per_day: 3

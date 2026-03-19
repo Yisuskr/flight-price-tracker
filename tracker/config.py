@@ -42,6 +42,7 @@ def load_config() -> dict:
     # Optional additional source keys (sources silently disabled if not set)
     cfg["kiwi_api_key"] = os.getenv("KIWI_API_KEY", "")
     cfg["rapidapi_key"] = os.getenv("RAPIDAPI_KEY", "")
+    cfg["aviasales_token"] = os.getenv("AVIASALES_TOKEN", "")
 
     # Support both old single-date keys and new list keys for backward compat
     if "outbound_date" in cfg and "outbound_dates" not in cfg:

@@ -1,10 +1,11 @@
 """
 main.py - Entry point for the Flight Price Tracker.
 
-Tres fuentes corren en ciclos independientes:
+Cuatro fuentes corren en ciclos independientes:
   - Google Flights (SerpAPI): cada 12h
   - Kiwi.com:                 cada 60h  (~96 llamadas/mes, límite gratuito: 500)
   - Skyscanner (RapidAPI):    cada 72h  (~80 llamadas/mes, límite gratuito: 100)
+  - Aviasales (Travelpayouts):cada 24h  (sin límite declarado, caché ~48h)
 
 Tras cada fetch se fusionan los resultados en caché, se guardan en SQLite
 y se envía un email comparativo si alguna opción baja del umbral.
@@ -27,6 +28,7 @@ from tracker.sources.aggregator import (
     fetch_google,
     fetch_kiwi,
     fetch_skyscanner,
+    fetch_aviasales,
     get_merged_results,
 )
 
@@ -197,6 +199,12 @@ def run_skyscanner(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> N
     evaluate_and_alert(cfg, conn, notifier, "Skyscanner")
 
 
+def run_aviasales(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
+    logger.info("=== [Aviasales] Iniciando fetch ===")
+    fetch_aviasales(cfg)
+    evaluate_and_alert(cfg, conn, notifier, "Aviasales")
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -229,12 +237,14 @@ def main() -> None:
         run_google(cfg, conn, notifier)
         run_kiwi(cfg, conn, notifier)
         run_skyscanner(cfg, conn, notifier)
+        run_aviasales(cfg, conn, notifier)
         sys.exit(0)
 
     # ── Intervalos por fuente ──────────────────────────────────────────────
     google_h = int(cfg.get("check_interval_hours", 12))
     kiwi_h = int(cfg.get("kiwi_interval_hours", 60))
     sky_h = int(cfg.get("skyscanner_interval_hours", 72))
+    avia_h = int(cfg.get("aviasales_interval_hours", 24))
 
     sym = "€" if cfg["currency"] == "EUR" else cfg["currency"]
     n_combos = (
@@ -248,23 +258,25 @@ def main() -> None:
         n_combos, sym, cfg["price_threshold_usd"],
     )
     logger.info(
-        "Intervalos → Google: %dh | Kiwi: %dh | Skyscanner: %dh",
-        google_h, kiwi_h, sky_h,
+        "Intervalos → Google: %dh | Kiwi: %dh | Skyscanner: %dh | Aviasales: %dh",
+        google_h, kiwi_h, sky_h, avia_h,
     )
 
     # Primer ciclo inmediato al arrancar
     run_google(cfg, conn, notifier)
     run_kiwi(cfg, conn, notifier)
     run_skyscanner(cfg, conn, notifier)
+    run_aviasales(cfg, conn, notifier)
 
     # Programar ciclos recurrentes independientes
     schedule.every(google_h).hours.do(run_google, cfg, conn, notifier)
     schedule.every(kiwi_h).hours.do(run_kiwi, cfg, conn, notifier)
     schedule.every(sky_h).hours.do(run_skyscanner, cfg, conn, notifier)
+    schedule.every(avia_h).hours.do(run_aviasales, cfg, conn, notifier)
 
     logger.info(
-        "Próximos checks → Google en %dh | Kiwi en %dh | Skyscanner en %dh",
-        google_h, kiwi_h, sky_h,
+        "Próximos checks → Google en %dh | Kiwi en %dh | Skyscanner en %dh | Aviasales en %dh",
+        google_h, kiwi_h, sky_h, avia_h,
     )
 
     try:

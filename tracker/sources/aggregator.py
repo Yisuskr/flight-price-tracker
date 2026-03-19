@@ -3,9 +3,10 @@ aggregator.py - Per-source fetch functions + result merging utilities.
 
 Each source has its own fetch function so main.py can schedule them
 independently at different intervals:
-  - Google Flights (SerpAPI): every 12h
-  - Kiwi.com:                 every 60h  (~96 calls/month, within 500 free)
-  - Skyscanner (RapidAPI):    every 72h  (~80 calls/month, within 100 free)
+  - Google Flights (SerpAPI):      every 12h
+  - Kiwi.com:                      every 60h  (~96 calls/month, within 500 free)
+  - Skyscanner (RapidAPI):         every 72h  (~80 calls/month, within 100 free)
+  - Aviasales (Travelpayouts):     every 24h  (no declared limit, cache refreshes ~48h)
 
 Deduplication: for the same (origin, outbound_date, return_date, airline)
 keep only the cheapest result across all sources.
@@ -16,6 +17,7 @@ import logging
 from tracker.flight import FlightResult, fetch_all_combinations
 from tracker.sources.kiwi import fetch_all_combinations_kiwi
 from tracker.sources.skyscanner import fetch_all_combinations_skyscanner
+from tracker.sources.aviasales import fetch_all_combinations_aviasales
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,7 @@ _latest: dict[str, list[FlightResult]] = {
     "google": [],
     "kiwi": [],
     "skyscanner": [],
+    "aviasales": [],
 }
 
 
@@ -118,18 +121,42 @@ def fetch_skyscanner(cfg: dict) -> list[FlightResult]:
         return []
 
 
+def fetch_aviasales(cfg: dict) -> list[FlightResult]:
+    """Fetch from Aviasales via Travelpayouts API and update the cache."""
+    token = cfg.get("aviasales_token")
+    if not token:
+        logger.info("[Aviasales] AVIASALES_TOKEN no configurado — saltando.")
+        return []
+    try:
+        results = fetch_all_combinations_aviasales(
+            **_base_kwargs(cfg),
+            token=token,
+        )
+        logger.info("[Aviasales] %d resultados obtenidos.", len(results))
+        _latest["aviasales"] = results
+        return results
+    except Exception as exc:
+        logger.error("[Aviasales] Error: %s", exc)
+        return []
+
+
 def get_merged_results() -> list[FlightResult]:
     """
     Returns the current deduplicated merge of all cached source results.
     Called after any source fetch to build the alert email.
     """
-    all_results = _latest["google"] + _latest["kiwi"] + _latest["skyscanner"]
+    all_results = (
+        _latest["google"]
+        + _latest["kiwi"]
+        + _latest["skyscanner"]
+        + _latest["aviasales"]
+    )
     if not all_results:
         return []
     deduped = _dedup(all_results)
     logger.info(
-        "[Aggregator] Cache: google=%d kiwi=%d skyscanner=%d → %d tras deduplicar.",
+        "[Aggregator] Cache: google=%d kiwi=%d skyscanner=%d aviasales=%d → %d tras deduplicar.",
         len(_latest["google"]), len(_latest["kiwi"]),
-        len(_latest["skyscanner"]), len(deduped),
+        len(_latest["skyscanner"]), len(_latest["aviasales"]), len(deduped),
     )
     return deduped

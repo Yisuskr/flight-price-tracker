@@ -1,0 +1,19 @@
+services:
+  - type: worker          # background process — no HTTP port needed, stays up 24/7
+    name: flight-price-tracker
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    disk:
+      name: data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: SERPAPI_KEY
+        sync: false       # you fill these in the Render dashboard
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: AVIASALES_TOKEN
+        sync: false
