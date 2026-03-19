@@ -17,8 +17,9 @@ from pathlib import Path
 import schedule
 
 from tracker.config import load_config
-from tracker.flight import FlightResult, fetch_all_combinations
+from tracker.flight import FlightResult
 from tracker.notifier import Notifier
+from tracker.sources.aggregator import fetch_all_sources
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -123,17 +124,7 @@ def run_check(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
         sym, threshold,
     )
 
-    results = fetch_all_combinations(
-        origin_airports=cfg["origin_airports"],
-        destination=cfg["destination"],
-        outbound_dates=cfg["outbound_dates"],
-        return_dates=cfg.get("return_dates", []),
-        adults=cfg["adults"],
-        currency=currency,
-        serpapi_key=cfg["serpapi_key"],
-        carry_on_bags=cfg.get("carry_on_bags", 0),
-        checked_bags=cfg.get("checked_bags", 0),
-    )
+    results = fetch_all_sources(cfg)
 
     if not results:
         logger.warning("Sin resultados en este ciclo. Se reintentará en el próximo intervalo.")

@@ -39,6 +39,9 @@ def load_config() -> dict:
     cfg["serpapi_key"] = _require_env("SERPAPI_KEY")
     cfg["smtp_user"] = _require_env("SMTP_USER")
     cfg["smtp_password"] = _require_env("SMTP_PASSWORD")
+    # Optional additional source keys (sources silently disabled if not set)
+    cfg["kiwi_api_key"] = os.getenv("KIWI_API_KEY", "")
+    cfg["rapidapi_key"] = os.getenv("RAPIDAPI_KEY", "")
 
     # Support both old single-date keys and new list keys for backward compat
     if "outbound_date" in cfg and "outbound_dates" not in cfg:

@@ -28,6 +28,8 @@ _ROW_ALERT = """\
   <td style="padding:10px 8px;border-bottom:1px solid #c8e6c9;font-weight:700;color:#2e7d32;">{duration}</td>
   <td style="padding:10px 8px;border-bottom:1px solid #c8e6c9;font-weight:700;color:#2e7d32;">{layovers}</td>
   <td style="padding:10px 8px;border-bottom:1px solid #c8e6c9;font-weight:700;color:#2e7d32;font-size:16px;">{sym}{price:.0f} &#9989;</td>
+  <td style="padding:10px 8px;border-bottom:1px solid #c8e6c9;font-size:11px;color:#1a73e8;">{source}</td>
+  <td style="padding:10px 8px;border-bottom:1px solid #c8e6c9;">{book_btn}</td>
 </tr>"""
 
 _ROW_NORMAL = """\
@@ -39,7 +41,12 @@ _ROW_NORMAL = """\
   <td style="padding:9px 8px;border-bottom:1px solid #eeeeee;color:#555;">{duration}</td>
   <td style="padding:9px 8px;border-bottom:1px solid #eeeeee;color:#555;">{layovers}</td>
   <td style="padding:9px 8px;border-bottom:1px solid #eeeeee;color:#555;">{sym}{price:.0f}</td>
+  <td style="padding:9px 8px;border-bottom:1px solid #eeeeee;font-size:11px;color:#888;">{source}</td>
+  <td style="padding:9px 8px;border-bottom:1px solid #eeeeee;">{book_btn}</td>
 </tr>"""
+
+_BOOK_BTN = '<a href="{url}" style="background:#1a73e8;color:#fff;text-decoration:none;padding:4px 10px;border-radius:4px;font-size:11px;white-space:nowrap;">Reservar</a>'
+_BOOK_BTN_NONE = '<span style="color:#ccc;font-size:11px;">—</span>'
 
 _HTML_BATCH = """\
 <!DOCTYPE html>
@@ -89,6 +96,8 @@ _HTML_BATCH = """\
         <th>Duración</th>
         <th>Escalas</th>
         <th>Precio</th>
+        <th>Fuente</th>
+        <th>Reservar</th>
       </tr>
     </thead>
     <tbody>
@@ -112,6 +121,8 @@ _HTML_BATCH = """\
 
 def _render_row(flight: FlightResult, sym: str, is_alert: bool) -> str:
     template = _ROW_ALERT if is_alert else _ROW_NORMAL
+    url = flight.booking_url()
+    book_btn = _BOOK_BTN.format(url=url) if url else _BOOK_BTN_NONE
     return template.format(
         origin=flight.origin,
         destination=flight.destination,
@@ -122,6 +133,8 @@ def _render_row(flight: FlightResult, sym: str, is_alert: bool) -> str:
         layovers=flight.layovers_str(),
         sym=sym,
         price=flight.price,
+        source=getattr(flight, "source", "—"),
+        book_btn=book_btn,
     )
 
 

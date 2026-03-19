@@ -8,6 +8,7 @@ import logging
 from dataclasses import dataclass, field
 from itertools import product
 from typing import Optional
+from urllib.parse import urlencode
 
 import requests
 
@@ -20,6 +21,9 @@ AIRPORT_NAMES = {
     "TFS": "Tenerife Sur",
     "TFN": "Tenerife Norte",
 }
+
+# Source identifier for results from this module
+SOURCE_NAME = "Google Flights"
 
 
 @dataclass
@@ -48,6 +52,7 @@ class FlightResult:
     stops: int
     layovers: list[Layover] = field(default_factory=list)
     booking_token: Optional[str] = None
+    source: str = SOURCE_NAME
     raw: Optional[dict] = None
 
     def is_direct(self) -> bool:
@@ -63,6 +68,21 @@ class FlightResult:
         if not self.layovers:
             return "Directo"
         return " -> ".join(str(lv) for lv in self.layovers)
+
+    def booking_url(self) -> Optional[str]:
+        """
+        Returns a direct deep-link to book this specific flight.
+        - For Google Flights results: uses the SerpAPI booking_token redirect endpoint.
+        - For other sources: the token already holds a full URL.
+        """
+        if not self.booking_token:
+            return None
+        if self.source == SOURCE_NAME:
+            # SerpAPI provides a booking_token we can redirect through
+            params = urlencode({"engine": "google_flights_booking", "token": self.booking_token})
+            return f"https://serpapi.com/search.json?{params}"
+        # Kiwi / Skyscanner store a full booking URL directly in booking_token
+        return self.booking_token
 
     def __str__(self) -> str:
         trip = f"round-trip (return {self.return_date})" if self.return_date else "one-way"
@@ -200,6 +220,7 @@ def fetch_cheapest_flight(
         stops=best["stops"],
         layovers=best["layovers"],
         booking_token=best["token"],
+        source=SOURCE_NAME,
         raw=best["raw"],
     )
 
