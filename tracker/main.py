@@ -49,7 +49,16 @@ logger = logging.getLogger("tracker.main")
 # ---------------------------------------------------------------------------
 # Base de datos
 # ---------------------------------------------------------------------------
-DB_PATH = Path(__file__).parent.parent / "data" / "prices.db"
+def _resolve_db_path() -> Path:
+    """Use /tmp if the preferred data/ directory can't be created (e.g. Render free tier)."""
+    preferred = Path(__file__).parent.parent / "data"
+    try:
+        preferred.mkdir(parents=True, exist_ok=True)
+        return preferred / "prices.db"
+    except OSError:
+        return Path("/tmp/prices.db")
+
+DB_PATH = _resolve_db_path()
 
 
 def init_db() -> sqlite3.Connection:
