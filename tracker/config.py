@@ -7,7 +7,6 @@ import yaml
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env from the project root (one level above this file)
 ROOT = Path(__file__).parent.parent
 load_dotenv(ROOT / ".env")
 
@@ -30,7 +29,7 @@ def load_config() -> dict:
     if not config_path.exists():
         raise FileNotFoundError(
             f"config.yaml not found at {config_path}. "
-            "Copy config.yaml.example to config.yaml and fill in your settings."
+            "Copy .env.example to .env and fill in your settings."
         )
 
     with open(config_path, "r") as f:
@@ -41,27 +40,28 @@ def load_config() -> dict:
     cfg["smtp_user"] = _require_env("SMTP_USER")
     cfg["smtp_password"] = _require_env("SMTP_PASSWORD")
 
-    # Validate required yaml fields
-    required_yaml = [
-        "alert_email",
-        "price_threshold_usd",
-        "outbound_date",
-        "check_interval_hours",
-    ]
-    for field in required_yaml:
-        if field not in cfg:
-            raise ValueError(
-                f"Missing required field '{field}' in config.yaml."
-            )
+    # Support both old single-date keys and new list keys for backward compat
+    if "outbound_date" in cfg and "outbound_dates" not in cfg:
+        cfg["outbound_dates"] = [cfg["outbound_date"]]
+    if "return_date" in cfg and "return_dates" not in cfg:
+        cfg["return_dates"] = [cfg["return_date"]] if cfg.get("return_date") else []
 
-    # Optional fields with defaults
-    cfg.setdefault("return_date", None)
-    cfg.setdefault("currency", "USD")
+    # Validate required fields
+    required = ["alert_email", "price_threshold_usd", "outbound_dates", "check_interval_hours"]
+    for field in required:
+        if not cfg.get(field):
+            raise ValueError(f"Missing required field '{field}' in config.yaml.")
+
+    # Defaults
+    cfg.setdefault("return_dates", [])
+    cfg.setdefault("currency", "EUR")
     cfg.setdefault("adults", 1)
+    cfg.setdefault("carry_on_bags", 0)
+    cfg.setdefault("checked_bags", 0)
     cfg.setdefault("smtp_host", "smtp.gmail.com")
     cfg.setdefault("smtp_port", 587)
-    cfg.setdefault("origin", "MIA")
-    cfg.setdefault("destination", "TFS")
+    cfg.setdefault("origin_airports", ["TFS", "TFN"])
+    cfg.setdefault("destination", "MIA")
     cfg.setdefault("max_alerts_per_day", 3)
 
     return cfg

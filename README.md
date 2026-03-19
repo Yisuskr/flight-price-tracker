@@ -1,6 +1,6 @@
 # ✈ Flight Price Tracker — Miami → Tenerife
 
-A 24/7 flight price monitoring bot that watches **Miami (MIA) → Tenerife (TFS)** on Google Flights and sends you an email the moment the price drops below your threshold.
+A 24/7 flight price monitoring bot that watches **Miami (MIA) → Tenerife (TFS + TFN)** on Google Flights and sends you an email the moment the price drops below your threshold. Monitors both Tenerife airports simultaneously and shows prices in EUR.
 
 Built with Python, SerpAPI, Gmail SMTP, and Docker. Deployable for free on Railway.
 
@@ -9,8 +9,10 @@ Built with Python, SerpAPI, Gmail SMTP, and Docker. Deployable for free on Railw
 ## Features
 
 - Checks Google Flights on a configurable interval (default: every 6 hours)
+- Searches **both Tenerife airports simultaneously**: TFS (Sur / Reina Sofia) and TFN (Norte / Los Rodeos)
 - Supports one-way and round-trip searches
-- Sends a beautifully formatted HTML email when the price drops below your limit
+- Prices in **EUR** by default (configurable)
+- Sends a beautifully formatted HTML email when the price drops below your limit, showing which airport is cheaper
 - Throttles alerts (configurable max emails per day) to avoid inbox spam
 - Stores full price history in a local SQLite database
 - Runs in Docker — one command to start, runs forever

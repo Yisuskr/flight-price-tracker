@@ -7,48 +7,56 @@
 # ---------------------------------------------------------------------------
 # Alert destination
 # ---------------------------------------------------------------------------
-# The email address that will receive price drop notifications.
-alert_email: "your@email.com"
+alert_email: "recipient@example.com"
 
 # ---------------------------------------------------------------------------
 # Price threshold
 # ---------------------------------------------------------------------------
-# You will receive an email alert when the cheapest found price is at or
-# below this value (in USD).
-price_threshold_usd: 600
+# Recibirás una alerta cuando el precio más barato encontrado sea <= este valor (en EUR).
+# Este precio es por persona, ida y vuelta, sin equipaje.
+price_threshold_usd: 700
 
 # ---------------------------------------------------------------------------
-# Travel dates
+# Fechas de viaje — el tracker probará TODAS las combinaciones posibles
 # ---------------------------------------------------------------------------
-# Format: YYYY-MM-DD
-outbound_date: "2026-06-15"
+# Días de salida (desde Tenerife hacia Miami)
+outbound_dates:
+  - "2026-04-27"
+  - "2026-04-28"
 
-# Leave blank (null) for a one-way search, or set a return date for
-# round-trip pricing.
-return_date: "2026-06-30"
+# Días de vuelta (desde Miami de vuelta a Tenerife)
+return_dates:
+  - "2026-05-08"
+  - "2026-05-09"
 
 # ---------------------------------------------------------------------------
-# Search parameters
+# Parámetros de búsqueda
 # ---------------------------------------------------------------------------
-origin: "MIA"           # Miami International Airport
-destination: "TFS"      # Tenerife South (Reina Sofia). Use TFN for Tenerife North.
+# Origen: Tenerife (busca en TFS y TFN automáticamente)
+# Destino: Miami International Airport
+origin_airports:
+  - "TFS"   # Tenerife Sur — Reina Sofia
+  - "TFN"   # Tenerife Norte — Los Rodeos
+destination: "MIA"   # Miami International Airport
+
 adults: 1
-currency: "USD"
+currency: "EUR"
+# Sin equipaje de bodega (solo equipaje de mano)
+carry_on_bags: 0
+checked_bags: 0
 
 # ---------------------------------------------------------------------------
-# Monitoring settings
+# Monitorización
 # ---------------------------------------------------------------------------
-# How often to query Google Flights (in hours).
-# SerpAPI free tier: 100 searches/month → ~every 7h uses ~100/month.
-# Recommended: 6 (checks ~4x per day, uses ~120/month on free tier).
-check_interval_hours: 6
+# Con 2 fechas salida x 2 fechas vuelta x 2 aeropuertos = 8 búsquedas por ciclo.
+# Free tier SerpAPI: 100/mes → cada 9h usa ~80/mes (margen seguro).
+check_interval_hours: 9
 
-# Maximum number of alert emails per day to avoid inbox flooding.
-# Once the threshold is crossed, you'll get at most this many emails/day.
+# Máximo de emails de alerta al día para no saturar el buzón.
 max_alerts_per_day: 3
 
 # ---------------------------------------------------------------------------
-# SMTP settings (Gmail defaults — no need to change for Gmail users)
+# SMTP — no cambiar si usas Gmail
 # ---------------------------------------------------------------------------
 smtp_host: "smtp.gmail.com"
 smtp_port: 587

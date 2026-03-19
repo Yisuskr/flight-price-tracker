@@ -5,7 +5,8 @@ SerpAPI docs: https://serpapi.com/google-flights-api
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from itertools import product
 from typing import Optional
 
 import requests
@@ -14,8 +15,25 @@ logger = logging.getLogger(__name__)
 
 SERPAPI_ENDPOINT = "https://serpapi.com/search"
 
-# Google Flights uses specific airport codes. TFS = Tenerife South (Reina Sofia)
-# TFN = Tenerife North (Los Rodeos) — we search TFS by default but support both.
+AIRPORT_NAMES = {
+    "MIA": "Miami",
+    "TFS": "Tenerife Sur",
+    "TFN": "Tenerife Norte",
+}
+
+
+@dataclass
+class Layover:
+    airport: str
+    duration_minutes: int
+
+    @property
+    def duration_str(self) -> str:
+        h, m = divmod(self.duration_minutes, 60)
+        return f"{h}h {m:02d}m"
+
+    def __str__(self) -> str:
+        return f"{self.airport} ({self.duration_str})"
 
 
 @dataclass
@@ -24,58 +42,68 @@ class FlightResult:
     destination: str
     outbound_date: str
     return_date: Optional[str]
-    price_usd: float
+    price: float
     airline: str
     duration: str
     stops: int
+    layovers: list[Layover] = field(default_factory=list)
     booking_token: Optional[str] = None
     raw: Optional[dict] = None
 
     def is_direct(self) -> bool:
         return self.stops == 0
 
+    def origin_name(self) -> str:
+        return AIRPORT_NAMES.get(self.origin, self.origin)
+
+    def destination_name(self) -> str:
+        return AIRPORT_NAMES.get(self.destination, self.destination)
+
+    def layovers_str(self) -> str:
+        if not self.layovers:
+            return "Directo"
+        return " -> ".join(str(lv) for lv in self.layovers)
+
     def __str__(self) -> str:
-        trip_type = f"round-trip (return {self.return_date})" if self.return_date else "one-way"
-        stops_str = "direct" if self.is_direct() else f"{self.stops} stop(s)"
+        trip = f"round-trip (return {self.return_date})" if self.return_date else "one-way"
         return (
-            f"{self.airline} | {self.origin} -> {self.destination} | "
-            f"{self.outbound_date} | {trip_type} | {stops_str} | "
-            f"{self.duration} | ${self.price_usd:.2f}"
+            f"{self.airline} | {self.origin} -> {self.destination} ({self.destination_name()}) | "
+            f"{self.outbound_date} | {trip} | {self.layovers_str()} | "
+            f"{self.duration} | {self.price:.2f}"
         )
 
 
-def _parse_duration(duration_str: str) -> str:
-    """Normalise the duration string returned by SerpAPI."""
-    return duration_str.strip() if duration_str else "N/A"
+def _parse_layovers(raw_layovers: list[dict]) -> list[Layover]:
+    result = []
+    for lv in raw_layovers:
+        airport = lv.get("name", lv.get("id", "?"))
+        duration = lv.get("duration", 0)
+        result.append(Layover(airport=airport, duration_minutes=duration))
+    return result
 
 
-def _extract_cheapest(flights: list[dict], currency: str) -> Optional[dict]:
+def _extract_cheapest(flights: list[dict]) -> Optional[dict]:
     """
-    Walk through the SerpAPI best_flights / other_flights list and return the
-    cheapest option, preferring direct flights when the price difference is
-    less than 10%.
+    Returns the cheapest flight group from a SerpAPI response list.
+    Prefers fewest stops when price is equal.
     """
     candidates = []
 
     for group in flights:
-        # Each group has a list of individual flight legs under 'flights'
         legs = group.get("flights", [])
         if not legs:
             continue
-
         price = group.get("price")
         if price is None:
             continue
 
         total_duration = group.get("total_duration", 0)
-        hours, mins = divmod(total_duration, 60)
-        duration_str = f"{hours}h {mins}m" if total_duration else "N/A"
+        h, m = divmod(total_duration, 60)
+        duration_str = f"{h}h {m:02d}m" if total_duration else "N/A"
 
-        # Count layovers
-        layovers = group.get("layovers", [])
-        stops = len(layovers)
+        raw_layovers = group.get("layovers", [])
+        layovers = _parse_layovers(raw_layovers)
 
-        # Airline is the operating carrier of the first leg
         first_leg = legs[0]
         airline = first_leg.get("airline", "Unknown")
 
@@ -83,7 +111,8 @@ def _extract_cheapest(flights: list[dict], currency: str) -> Optional[dict]:
             "price": float(price),
             "airline": airline,
             "duration": duration_str,
-            "stops": stops,
+            "stops": len(layovers),
+            "layovers": layovers,
             "token": group.get("booking_token"),
             "raw": group,
         })
@@ -91,11 +120,8 @@ def _extract_cheapest(flights: list[dict], currency: str) -> Optional[dict]:
     if not candidates:
         return None
 
-    # Sort by price, then prefer direct
     candidates.sort(key=lambda x: (x["price"], x["stops"]))
-    best = candidates[0]
-
-    return best  # caller builds FlightResult
+    return candidates[0]
 
 
 def fetch_cheapest_flight(
@@ -106,10 +132,11 @@ def fetch_cheapest_flight(
     adults: int,
     currency: str,
     serpapi_key: str,
+    carry_on_bags: int = 0,
+    checked_bags: int = 0,
 ) -> Optional[FlightResult]:
     """
     Query SerpAPI for the cheapest flight between origin and destination.
-
     Returns a FlightResult or None if no flights are found / API error.
     """
     params = {
@@ -121,23 +148,22 @@ def fetch_cheapest_flight(
         "hl": "en",
         "adults": adults,
         "api_key": serpapi_key,
-        # Show all results (not just best picks) for a wider price scan
         "show_hidden": True,
+        "carry_on_bags": carry_on_bags,
+        "checked_bags": checked_bags,
     }
 
-    # Round-trip vs one-way
     if return_date:
         params["return_date"] = return_date
-        params["type"] = "1"  # 1 = round trip
+        params["type"] = "1"  # round trip
     else:
-        params["type"] = "2"  # 2 = one-way
+        params["type"] = "2"  # one-way
 
     logger.info(
-        "Querying SerpAPI: %s -> %s on %s%s",
-        origin,
-        destination,
-        outbound_date,
-        f" / return {return_date}" if return_date else "",
+        "SerpAPI: %s -> %s | salida %s%s | mano=%d facturado=%d",
+        origin, destination, outbound_date,
+        f" vuelta {return_date}" if return_date else "",
+        carry_on_bags, checked_bags,
     )
 
     try:
@@ -149,19 +175,17 @@ def fetch_cheapest_flight(
 
     data = response.json()
 
-    # SerpAPI returns an 'error' key on quota exhaustion or bad keys
     if "error" in data:
         logger.error("SerpAPI error: %s", data["error"])
         return None
 
-    # Combine best_flights and other_flights for a full picture
     all_flights = data.get("best_flights", []) + data.get("other_flights", [])
 
     if not all_flights:
-        logger.warning("No flights returned by SerpAPI for this query.")
+        logger.warning("Sin resultados para %s -> %s el %s.", origin, destination, outbound_date)
         return None
 
-    best = _extract_cheapest(all_flights, currency)
+    best = _extract_cheapest(all_flights)
     if best is None:
         return None
 
@@ -170,10 +194,54 @@ def fetch_cheapest_flight(
         destination=destination,
         outbound_date=outbound_date,
         return_date=return_date,
-        price_usd=best["price"],
+        price=best["price"],
         airline=best["airline"],
         duration=best["duration"],
         stops=best["stops"],
+        layovers=best["layovers"],
         booking_token=best["token"],
         raw=best["raw"],
     )
+
+
+def fetch_all_combinations(
+    origin_airports: list[str],
+    destination: str,
+    outbound_dates: list[str],
+    return_dates: list[str],
+    adults: int,
+    currency: str,
+    serpapi_key: str,
+    carry_on_bags: int = 0,
+    checked_bags: int = 0,
+) -> list[FlightResult]:
+    """
+    Busca TODAS las combinaciones de:
+      - aeropuertos de origen (TFS, TFN)
+      - fechas de salida    (27 abr, 28 abr)
+      - fechas de vuelta    (8 may, 9 may)
+
+    Devuelve todos los resultados encontrados ordenados por precio ascendente.
+    """
+    results = []
+    return_list = return_dates if return_dates else [None]
+    combos = list(product(origin_airports, outbound_dates, return_list))
+    logger.info("Lanzando %d combinaciones de búsqueda...", len(combos))
+
+    for origin, outbound, return_date in combos:
+        result = fetch_cheapest_flight(
+            origin=origin,
+            destination=destination,
+            outbound_date=outbound,
+            return_date=return_date,
+            adults=adults,
+            currency=currency,
+            serpapi_key=serpapi_key,
+            carry_on_bags=carry_on_bags,
+            checked_bags=checked_bags,
+        )
+        if result is not None:
+            results.append(result)
+
+    results.sort(key=lambda r: r.price)
+    return results

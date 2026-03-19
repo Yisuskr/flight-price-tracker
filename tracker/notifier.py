@@ -13,142 +13,173 @@ from tracker.flight import FlightResult
 
 logger = logging.getLogger(__name__)
 
-# HTML email template for the alert
-_HTML_TEMPLATE = """\
+_CURRENCY_SYMBOL = {"EUR": "€", "USD": "$", "GBP": "£"}
+
+# ---------------------------------------------------------------------------
+# HTML row templates
+# ---------------------------------------------------------------------------
+
+_ROW_ALERT = """\
+<tr style="background:#e8f5e9;">
+  <td style="padding:10px 8px;border-bottom:1px solid #c8e6c9;font-weight:700;color:#2e7d32;">{origin} &#8594; {destination}</td>
+  <td style="padding:10px 8px;border-bottom:1px solid #c8e6c9;font-weight:700;color:#2e7d32;">{outbound_date}</td>
+  <td style="padding:10px 8px;border-bottom:1px solid #c8e6c9;font-weight:700;color:#2e7d32;">{return_date}</td>
+  <td style="padding:10px 8px;border-bottom:1px solid #c8e6c9;font-weight:700;color:#2e7d32;">{airline}</td>
+  <td style="padding:10px 8px;border-bottom:1px solid #c8e6c9;font-weight:700;color:#2e7d32;">{duration}</td>
+  <td style="padding:10px 8px;border-bottom:1px solid #c8e6c9;font-weight:700;color:#2e7d32;">{layovers}</td>
+  <td style="padding:10px 8px;border-bottom:1px solid #c8e6c9;font-weight:700;color:#2e7d32;font-size:16px;">{sym}{price:.0f} &#9989;</td>
+</tr>"""
+
+_ROW_NORMAL = """\
+<tr>
+  <td style="padding:9px 8px;border-bottom:1px solid #eeeeee;color:#555;">{origin} &#8594; {destination}</td>
+  <td style="padding:9px 8px;border-bottom:1px solid #eeeeee;color:#555;">{outbound_date}</td>
+  <td style="padding:9px 8px;border-bottom:1px solid #eeeeee;color:#555;">{return_date}</td>
+  <td style="padding:9px 8px;border-bottom:1px solid #eeeeee;color:#555;">{airline}</td>
+  <td style="padding:9px 8px;border-bottom:1px solid #eeeeee;color:#555;">{duration}</td>
+  <td style="padding:9px 8px;border-bottom:1px solid #eeeeee;color:#555;">{layovers}</td>
+  <td style="padding:9px 8px;border-bottom:1px solid #eeeeee;color:#555;">{sym}{price:.0f}</td>
+</tr>"""
+
+_HTML_BATCH = """\
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <style>
-    body {{ font-family: Arial, sans-serif; background-color: #f4f6f8; margin: 0; padding: 20px; }}
-    .card {{
-      background: #ffffff;
-      border-radius: 12px;
-      padding: 30px;
-      max-width: 580px;
-      margin: 0 auto;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-    }}
-    .header {{ text-align: center; margin-bottom: 24px; }}
-    .header h1 {{ color: #1a73e8; margin: 0; font-size: 26px; }}
-    .route {{ font-size: 18px; font-weight: bold; color: #333; text-align: center; margin: 16px 0; }}
-    .price-box {{
-      background: #e8f5e9;
-      border: 2px solid #43a047;
-      border-radius: 8px;
-      text-align: center;
-      padding: 20px;
-      margin: 20px 0;
-    }}
-    .price-box .label {{ font-size: 13px; color: #555; text-transform: uppercase; letter-spacing: 1px; }}
-    .price-box .amount {{ font-size: 42px; font-weight: bold; color: #2e7d32; }}
-    .price-box .threshold {{ font-size: 13px; color: #888; margin-top: 6px; }}
-    .details-table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
-    .details-table td {{ padding: 10px 8px; border-bottom: 1px solid #eeeeee; font-size: 14px; }}
-    .details-table td:first-child {{ color: #777; width: 40%; }}
-    .details-table td:last-child {{ font-weight: 600; color: #333; }}
-    .cta {{
-      display: block;
-      text-align: center;
-      background: #1a73e8;
-      color: #fff !important;
-      text-decoration: none;
-      padding: 14px 28px;
-      border-radius: 8px;
-      font-size: 15px;
-      font-weight: bold;
-      margin: 24px auto;
-      width: fit-content;
-    }}
-    .footer {{ text-align: center; font-size: 12px; color: #aaa; margin-top: 24px; }}
+    body {{ font-family: Arial, sans-serif; background:#f4f6f8; margin:0; padding:20px; }}
+    .card {{ background:#fff; border-radius:12px; padding:30px; max-width:800px; margin:0 auto;
+             box-shadow:0 2px 10px rgba(0,0,0,0.08); }}
+    h1 {{ color:#1a73e8; margin:0 0 4px; font-size:24px; }}
+    .subtitle {{ color:#555; font-size:14px; margin-bottom:20px; }}
+    .best-price {{ background:#e8f5e9; border:2px solid #43a047; border-radius:8px;
+                   text-align:center; padding:16px; margin:20px 0; }}
+    .best-price .label {{ font-size:12px; color:#555; text-transform:uppercase; letter-spacing:1px; }}
+    .best-price .amount {{ font-size:40px; font-weight:bold; color:#2e7d32; }}
+    .best-price .sub {{ font-size:13px; color:#777; margin-top:4px; }}
+    table {{ width:100%; border-collapse:collapse; font-size:13px; margin-top:16px; }}
+    th {{ background:#1a73e8; color:#fff; padding:10px 8px; text-align:left; font-size:12px;
+          text-transform:uppercase; letter-spacing:.5px; }}
+    .cta {{ display:block; text-align:center; background:#1a73e8; color:#fff !important;
+            text-decoration:none; padding:13px 28px; border-radius:8px; font-size:15px;
+            font-weight:bold; margin:24px auto; width:fit-content; }}
+    .footer {{ text-align:center; font-size:12px; color:#aaa; margin-top:24px; }}
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="header">
-      <h1>✈ Flight Price Alert</h1>
-      <p style="color:#555;margin:4px 0;">A price below your threshold was found!</p>
-    </div>
+<div class="card">
+  <h1>&#9992; Alerta de Precio de Vuelo</h1>
+  <div class="subtitle">Tenerife (TFS/TFN) &#8594; Miami (MIA) &bull; Sin equipaje &bull; Ida y vuelta</div>
 
-    <div class="route">{origin_name} ({origin}) &rarr; {destination_name} ({destination})</div>
-
-    <div class="price-box">
-      <div class="label">Best price found</div>
-      <div class="amount">${price:.0f} {currency}</div>
-      <div class="threshold">Your alert threshold: ${threshold:.0f} {currency}</div>
-    </div>
-
-    <table class="details-table">
-      <tr><td>Airline</td><td>{airline}</td></tr>
-      <tr><td>Departure date</td><td>{outbound_date}</td></tr>
-      <tr><td>Return date</td><td>{return_date}</td></tr>
-      <tr><td>Trip type</td><td>{trip_type}</td></tr>
-      <tr><td>Duration</td><td>{duration}</td></tr>
-      <tr><td>Stops</td><td>{stops}</td></tr>
-      <tr><td>Checked at</td><td>{checked_at}</td></tr>
-    </table>
-
-    <a class="cta" href="https://www.google.com/flights?hl=en#flt={origin}.{destination}.{outbound_date};c:{currency};e:1;s:0*1;sd:1;t:f">
-      Search on Google Flights
-    </a>
-
-    <div class="footer">
-      Sent by your Flight Price Tracker &bull; MIA &rarr; TFS monitor<br>
-      To stop receiving alerts, update <code>price_threshold_usd</code> in your config.yaml.
-    </div>
+  <div class="best-price">
+    <div class="label">Mejor precio encontrado</div>
+    <div class="amount">{sym}{best_price:.0f} {currency}</div>
+    <div class="sub">{best_airline} &bull; {best_origin} &#8594; MIA &bull; Sal. {best_outbound} / Vuel. {best_return}</div>
+    <div class="sub">Escala(s): {best_layovers}</div>
+    <div class="sub" style="color:#888;margin-top:6px;">Tu umbral: {sym}{threshold:.0f} {currency}</div>
   </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Ruta</th>
+        <th>Salida</th>
+        <th>Vuelta</th>
+        <th>Aerolinea</th>
+        <th>Duración</th>
+        <th>Escalas</th>
+        <th>Precio</th>
+      </tr>
+    </thead>
+    <tbody>
+{rows}
+    </tbody>
+  </table>
+
+  <a class="cta" href="https://www.google.com/flights?hl=es#flt={best_origin}.MIA.{best_outbound};c:{currency};e:1;s:0*1;sd:1;t:f">
+    Buscar en Google Flights
+  </a>
+
+  <div class="footer">
+    Enviado por tu Flight Price Tracker &bull; TFS/TFN &#8594; MIA monitor<br>
+    Revisado: {checked_at} UTC &bull; {n_combos} combinaciones analizadas<br>
+    Para ajustar el umbral, edita <code>price_threshold_usd</code> en config.yaml.
+  </div>
+</div>
 </body>
-</html>
-"""
+</html>"""
 
 
-def _build_message(
-    flight: FlightResult,
+def _render_row(flight: FlightResult, sym: str, is_alert: bool) -> str:
+    template = _ROW_ALERT if is_alert else _ROW_NORMAL
+    return template.format(
+        origin=flight.origin,
+        destination=flight.destination,
+        outbound_date=flight.outbound_date,
+        return_date=flight.return_date or "—",
+        airline=flight.airline,
+        duration=flight.duration,
+        layovers=flight.layovers_str(),
+        sym=sym,
+        price=flight.price,
+    )
+
+
+def _build_batch_message(
+    all_results: list[FlightResult],
+    alerts: list[FlightResult],
     threshold: float,
     currency: str,
     recipient: str,
     sender: str,
 ) -> MIMEMultipart:
+    sym = _CURRENCY_SYMBOL.get(currency, currency)
+    alert_set = {id(f) for f in alerts}
+    best = all_results[0]  # already sorted by price ascending
+
+    rows_html = "\n".join(
+        _render_row(f, sym, id(f) in alert_set) for f in all_results
+    )
+
+    html = _HTML_BATCH.format(
+        sym=sym,
+        currency=currency,
+        threshold=threshold,
+        best_price=best.price,
+        best_airline=best.airline,
+        best_origin=best.origin,
+        best_outbound=best.outbound_date,
+        best_return=best.return_date or "—",
+        best_layovers=best.layovers_str(),
+        rows=rows_html,
+        checked_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+        n_combos=len(all_results),
+    )
+
+    # Plain text fallback
+    lines = [
+        "ALERTA DE PRECIO — Tenerife -> Miami",
+        f"Umbral: {sym}{threshold:.0f} {currency}",
+        f"Revisado: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
+        "",
+        f"{'Ruta':<12} {'Salida':<12} {'Vuelta':<12} {'Precio':>8}  {'Aerolinea':<16} {'Duración':<10} Escalas",
+        "-" * 95,
+    ]
+    for f in all_results:
+        mark = " <-- ALERTA" if id(f) in alert_set else ""
+        lines.append(
+            f"{f.origin}->{f.destination:<6} {f.outbound_date:<12} {f.return_date or '—':<12} "
+            f"{sym}{f.price:>6.0f}  {f.airline:<16} {f.duration:<10} {f.layovers_str()}{mark}"
+        )
+
     msg = MIMEMultipart("alternative")
     msg["Subject"] = (
-        f"[Flight Alert] MIA→TFS ${flight.price_usd:.0f} {currency} "
-        f"({flight.outbound_date})"
+        f"[Vuelo Alerta] TFS/TFN->MIA {sym}{best.price:.0f} {currency} "
+        f"| {best.outbound_date} -> {best.return_date or '—'}"
     )
     msg["From"] = f"Flight Tracker <{sender}>"
     msg["To"] = recipient
-
-    # Plain text fallback
-    plain = (
-        f"Price Alert: Miami (MIA) -> Tenerife (TFS)\n\n"
-        f"Price found: ${flight.price_usd:.2f} {currency}\n"
-        f"Your threshold: ${threshold:.2f} {currency}\n\n"
-        f"Airline:        {flight.airline}\n"
-        f"Departure:      {flight.outbound_date}\n"
-        f"Return:         {flight.return_date or 'N/A (one-way)'}\n"
-        f"Duration:       {flight.duration}\n"
-        f"Stops:          {'Direct' if flight.stops == 0 else flight.stops}\n"
-        f"Checked at:     {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
-        f"Search: https://www.google.com/flights\n"
-    )
-
-    html = _HTML_TEMPLATE.format(
-        origin=flight.origin,
-        destination=flight.destination,
-        origin_name="Miami",
-        destination_name="Tenerife",
-        price=flight.price_usd,
-        threshold=threshold,
-        currency=currency,
-        airline=flight.airline,
-        outbound_date=flight.outbound_date,
-        return_date=flight.return_date or "N/A (one-way)",
-        trip_type="Round-trip" if flight.return_date else "One-way",
-        duration=flight.duration,
-        stops="Direct" if flight.stops == 0 else str(flight.stops),
-        checked_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
-    )
-
-    msg.attach(MIMEText(plain, "plain"))
+    msg.attach(MIMEText("\n".join(lines), "plain"))
     msg.attach(MIMEText(html, "html"))
     return msg
 
@@ -162,8 +193,6 @@ class Notifier:
         self.recipient: str = cfg["alert_email"]
         self.currency: str = cfg["currency"]
         self.max_alerts_per_day: int = cfg["max_alerts_per_day"]
-
-        # Throttle: track how many emails sent today
         self._alert_date: Optional[date] = None
         self._alerts_today: int = 0
 
@@ -173,28 +202,11 @@ class Notifier:
             self._alert_date = today
             self._alerts_today = 0
         if self._alerts_today >= self.max_alerts_per_day:
-            logger.info(
-                "Daily alert limit (%d) reached. Skipping email.", self.max_alerts_per_day
-            )
+            logger.info("Límite diario (%d emails) alcanzado.", self.max_alerts_per_day)
             return False
         return True
 
-    def send_alert(self, flight: FlightResult, threshold: float) -> bool:
-        """
-        Send a price alert email. Returns True on success.
-        Respects the max_alerts_per_day cap to avoid inbox flooding.
-        """
-        if not self._can_send():
-            return False
-
-        msg = _build_message(
-            flight=flight,
-            threshold=threshold,
-            currency=self.currency,
-            recipient=self.recipient,
-            sender=self.smtp_user,
-        )
-
+    def _send(self, msg: MIMEMultipart) -> bool:
         try:
             with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as server:
                 server.ehlo()
@@ -203,42 +215,52 @@ class Notifier:
                 server.sendmail(self.smtp_user, self.recipient, msg.as_string())
             self._alerts_today += 1
             logger.info(
-                "Alert email sent to %s (alerts today: %d/%d)",
-                self.recipient,
-                self._alerts_today,
-                self.max_alerts_per_day,
+                "Email enviado a %s (hoy: %d/%d)",
+                self.recipient, self._alerts_today, self.max_alerts_per_day,
             )
             return True
         except smtplib.SMTPException as exc:
-            logger.error("Failed to send alert email: %s", exc)
+            logger.error("Error enviando email: %s", exc)
             return False
+
+    def send_alert_batch(
+        self,
+        all_results: list[FlightResult],
+        alerts: list[FlightResult],
+        threshold: float,
+    ) -> bool:
+        """
+        Envía un único email con tabla comparativa de TODAS las combinaciones,
+        resaltando en verde las que están por debajo del umbral.
+        """
+        if not self._can_send():
+            return False
+        msg = _build_batch_message(
+            all_results=all_results,
+            alerts=alerts,
+            threshold=threshold,
+            currency=self.currency,
+            recipient=self.recipient,
+            sender=self.smtp_user,
+        )
+        return self._send(msg)
 
     def send_test_email(self) -> bool:
-        """Send a test email to verify SMTP credentials are working."""
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = "[Flight Tracker] Test email - setup successful!"
+        msg["Subject"] = "[Flight Tracker] Email de prueba — configuración correcta"
         msg["From"] = f"Flight Tracker <{self.smtp_user}>"
         msg["To"] = self.recipient
-
         html = """\
         <html><body style="font-family:Arial,sans-serif;padding:20px;">
-          <h2 style="color:#1a73e8;">✈ Flight Tracker is running!</h2>
-          <p>Your email alerts are configured correctly.</p>
-          <p>You will receive a notification whenever a Miami &rarr; Tenerife
-             flight drops below your configured price threshold.</p>
+          <h2 style="color:#1a73e8;">&#9992; Flight Tracker activo</h2>
+          <p>El email funciona correctamente.</p>
+          <p>Monitorizando <strong>TFS y TFN &#8594; MIA</strong> con
+             <strong>4 combinaciones de fechas</strong> por ciclo.</p>
+          <p>Recibirás un email con tabla comparativa cuando alguna opción baje de tu umbral.</p>
         </body></html>"""
-
-        msg.attach(MIMEText("Flight Tracker is running! Email alerts are configured correctly.", "plain"))
+        msg.attach(MIMEText(
+            "Flight Tracker activo. Monitorizando TFS+TFN -> MIA con múltiples combos de fechas.",
+            "plain"
+        ))
         msg.attach(MIMEText(html, "html"))
-
-        try:
-            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as server:
-                server.ehlo()
-                server.starttls()
-                server.login(self.smtp_user, self.smtp_password)
-                server.sendmail(self.smtp_user, self.recipient, msg.as_string())
-            logger.info("Test email sent to %s", self.recipient)
-            return True
-        except smtplib.SMTPException as exc:
-            logger.error("Failed to send test email: %s", exc)
-            return False
+        return self._send(msg)
