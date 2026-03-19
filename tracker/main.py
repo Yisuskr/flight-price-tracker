@@ -13,10 +13,13 @@ y se envía un email comparativo si alguna opción baja del umbral.
 
 import argparse
 import logging
+import os
 import sqlite3
 import sys
+import threading
 import time
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import schedule
@@ -206,6 +209,28 @@ def run_aviasales(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> No
 
 
 # ---------------------------------------------------------------------------
+# Minimal HTTP health server — required by Render's free web service tier
+# Runs in a background thread; does not affect the tracker logic
+# ---------------------------------------------------------------------------
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, format, *args):  # noqa: A002
+        pass  # silence access logs
+
+
+def _start_health_server() -> None:
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info("Health server escuchando en puerto %d", port)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def parse_args() -> argparse.Namespace:
@@ -226,6 +251,9 @@ def main() -> None:
     cfg = load_config()
     conn = init_db()
     notifier = Notifier(cfg)
+
+    # Start health server so Render's web service tier keeps the process alive
+    _start_health_server()
 
     if args.test_email:
         logger.info("Enviando email de prueba a %s ...", cfg["alert_email"])

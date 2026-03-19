@@ -1,5 +1,5 @@
 services:
-  - type: worker
+  - type: web
     name: flight-price-tracker
     runtime: docker
     plan: free
