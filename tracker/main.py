@@ -1,9 +1,13 @@
 """
 main.py - Entry point for the Flight Price Tracker.
 
-Busca TODAS las combinaciones de fechas y aeropuertos en cada ciclo,
-guarda el historial en SQLite y envía un email comparativo cuando
-alguna opción baja del precio umbral.
+Tres fuentes corren en ciclos independientes:
+  - Google Flights (SerpAPI): cada 12h
+  - Kiwi.com:                 cada 60h  (~96 llamadas/mes, límite gratuito: 500)
+  - Skyscanner (RapidAPI):    cada 72h  (~80 llamadas/mes, límite gratuito: 100)
+
+Tras cada fetch se fusionan los resultados en caché, se guardan en SQLite
+y se envía un email comparativo si alguna opción baja del umbral.
 """
 
 import argparse
@@ -19,7 +23,12 @@ import schedule
 from tracker.config import load_config
 from tracker.flight import FlightResult
 from tracker.notifier import Notifier
-from tracker.sources.aggregator import fetch_all_sources
+from tracker.sources.aggregator import (
+    fetch_google,
+    fetch_kiwi,
+    fetch_skyscanner,
+    get_merged_results,
+)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -56,6 +65,7 @@ def init_db() -> sqlite3.Connection:
             duration      TEXT,
             stops         INTEGER,
             layovers      TEXT,
+            source        TEXT,
             alerted       INTEGER DEFAULT 0
         )
         """
@@ -72,8 +82,8 @@ def record_price(
         """
         INSERT INTO price_history
             (checked_at, origin, destination, outbound_date, return_date,
-             airline, price, currency, duration, stops, layovers, alerted)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             airline, price, currency, duration, stops, layovers, source, alerted)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             datetime.now(timezone.utc).isoformat(),
@@ -87,6 +97,7 @@ def record_price(
             flight.duration,
             flight.stops,
             flight.layovers_str(),
+            getattr(flight, "source", ""),
             1 if alerted else 0,
         ),
     )
@@ -108,26 +119,25 @@ def get_history_summary(conn: sqlite3.Connection, currency: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Lógica principal de cada ciclo
+# Evaluación y alerta — se llama tras cada fetch de cualquier fuente
 # ---------------------------------------------------------------------------
-def run_check(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
+def evaluate_and_alert(
+    cfg: dict,
+    conn: sqlite3.Connection,
+    notifier: Notifier,
+    source_label: str,
+) -> None:
+    """
+    Fusiona los resultados del caché de todas las fuentes, guarda en BD
+    y envía alerta si hay opciones por debajo del umbral.
+    """
     currency = cfg["currency"]
     sym = "€" if currency == "EUR" else currency
     threshold = float(cfg["price_threshold_usd"])
 
-    logger.info("=== Iniciando ciclo de búsqueda ===")
-    logger.info(get_history_summary(conn, currency))
-    logger.info(
-        "Combinaciones: %s -> %s | salidas: %s | vueltas: %s | umbral: %s%s",
-        cfg["origin_airports"], cfg["destination"],
-        cfg["outbound_dates"], cfg.get("return_dates", []),
-        sym, threshold,
-    )
-
-    results = fetch_all_sources(cfg)
-
+    results = get_merged_results()
     if not results:
-        logger.warning("Sin resultados en este ciclo. Se reintentará en el próximo intervalo.")
+        logger.warning("[%s] Sin resultados tras fusionar fuentes.", source_label)
         return
 
     alerts_to_send = []
@@ -137,17 +147,21 @@ def run_check(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
         if should_alert:
             alerts_to_send.append(flight)
         logger.info(
-            "[%s] %s->%s | sal %s vuel %s | %s%s | %s | %s",
+            "[%s] %s->%s | sal %s vuel %s | %s%s | %s | %s | %s",
             "ALERTA" if should_alert else "     ",
             flight.origin, flight.destination,
             flight.outbound_date, flight.return_date or "—",
             sym, f"{flight.price:.0f}",
             flight.airline,
             flight.layovers_str(),
+            getattr(flight, "source", ""),
         )
 
     if alerts_to_send:
-        logger.info("%d opción(es) por debajo del umbral. Enviando email...", len(alerts_to_send))
+        logger.info(
+            "%d opción(es) por debajo del umbral. Enviando email...",
+            len(alerts_to_send),
+        )
         notifier.send_alert_batch(results, alerts_to_send, threshold)
     else:
         logger.info(
@@ -155,7 +169,32 @@ def run_check(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
             sym, f"{results[0].price:.0f}", sym, f"{threshold:.0f}",
         )
 
-    logger.info("=== Ciclo completo — %d resultados ===", len(results))
+    logger.info(
+        "=== [%s] Ciclo completo — %d resultados fusionados ===",
+        source_label, len(results),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Jobs del scheduler (uno por fuente)
+# ---------------------------------------------------------------------------
+def run_google(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
+    logger.info("=== [Google] Iniciando fetch ===")
+    logger.info(get_history_summary(conn, cfg["currency"]))
+    fetch_google(cfg)
+    evaluate_and_alert(cfg, conn, notifier, "Google")
+
+
+def run_kiwi(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
+    logger.info("=== [Kiwi] Iniciando fetch ===")
+    fetch_kiwi(cfg)
+    evaluate_and_alert(cfg, conn, notifier, "Kiwi")
+
+
+def run_skyscanner(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
+    logger.info("=== [Skyscanner] Iniciando fetch ===")
+    fetch_skyscanner(cfg)
+    evaluate_and_alert(cfg, conn, notifier, "Skyscanner")
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +203,10 @@ def run_check(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Tenerife -> Miami Flight Price Tracker")
     parser.add_argument("--test-email", action="store_true", help="Envía email de prueba y sale.")
-    parser.add_argument("--check-now", action="store_true", help="Ejecuta un check y sale.")
+    parser.add_argument(
+        "--check-now", action="store_true",
+        help="Ejecuta todas las fuentes inmediatamente y sale.",
+    )
     return parser.parse_args()
 
 
@@ -183,25 +225,47 @@ def main() -> None:
         sys.exit(0 if ok else 1)
 
     if args.check_now:
-        run_check(cfg, conn, notifier)
+        logger.info("=== --check-now: ejecutando todas las fuentes ===")
+        run_google(cfg, conn, notifier)
+        run_kiwi(cfg, conn, notifier)
+        run_skyscanner(cfg, conn, notifier)
         sys.exit(0)
 
-    interval_hours = float(cfg["check_interval_hours"])
+    # ── Intervalos por fuente ──────────────────────────────────────────────
+    google_h = int(cfg.get("check_interval_hours", 12))
+    kiwi_h = int(cfg.get("kiwi_interval_hours", 60))
+    sky_h = int(cfg.get("skyscanner_interval_hours", 72))
+
     sym = "€" if cfg["currency"] == "EUR" else cfg["currency"]
     n_combos = (
         len(cfg["origin_airports"])
         * len(cfg["outbound_dates"])
         * max(len(cfg.get("return_dates", [])), 1)
     )
+
     logger.info(
-        "Tracker iniciado | %d combinaciones/ciclo | umbral: %s%s | intervalo: %gh",
-        n_combos, sym, cfg["price_threshold_usd"], interval_hours,
+        "Tracker iniciado | %d combos/ciclo | umbral: %s%s",
+        n_combos, sym, cfg["price_threshold_usd"],
+    )
+    logger.info(
+        "Intervalos → Google: %dh | Kiwi: %dh | Skyscanner: %dh",
+        google_h, kiwi_h, sky_h,
     )
 
-    run_check(cfg, conn, notifier)
+    # Primer ciclo inmediato al arrancar
+    run_google(cfg, conn, notifier)
+    run_kiwi(cfg, conn, notifier)
+    run_skyscanner(cfg, conn, notifier)
 
-    schedule.every(int(interval_hours)).hours.do(run_check, cfg, conn, notifier)
-    logger.info("Próximo check en %.1f hora(s). Tracker corriendo 24/7.", interval_hours)
+    # Programar ciclos recurrentes independientes
+    schedule.every(google_h).hours.do(run_google, cfg, conn, notifier)
+    schedule.every(kiwi_h).hours.do(run_kiwi, cfg, conn, notifier)
+    schedule.every(sky_h).hours.do(run_skyscanner, cfg, conn, notifier)
+
+    logger.info(
+        "Próximos checks → Google en %dh | Kiwi en %dh | Skyscanner en %dh",
+        google_h, kiwi_h, sky_h,
+    )
 
     try:
         while True:

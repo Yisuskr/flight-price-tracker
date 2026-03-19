@@ -48,9 +48,19 @@ checked_bags: 0
 # ---------------------------------------------------------------------------
 # Monitorización
 # ---------------------------------------------------------------------------
-# Con 2 fechas salida x 2 fechas vuelta x 2 aeropuertos = 8 búsquedas por ciclo.
-# Free tier SerpAPI: 100/mes → cada 9h usa ~80/mes (margen seguro).
-check_interval_hours: 9
+# Intervalo por fuente (en horas). Cada fuente corre en su propio ciclo
+# para respetar los límites gratuitos de cada API.
+#
+#   SerpAPI (Google Flights): 100 llamadas/mes gratis
+#     → cada 12h usa ~240/mes (se agota a mitad de mes, luego solo Kiwi/Sky)
+#   Kiwi.com: 500 llamadas/mes gratis
+#     → cada 60h usa ~96/mes ✅
+#   Skyscanner (RapidAPI): ~100 llamadas/mes gratis
+#     → cada 72h usa ~80/mes ✅
+#
+check_interval_hours: 12        # Google Flights (SerpAPI)
+kiwi_interval_hours: 60         # Kiwi.com (Tequila API)
+skyscanner_interval_hours: 72   # Skyscanner (RapidAPI)
 
 # Máximo de emails de alerta al día para no saturar el buzón.
 max_alerts_per_day: 3
