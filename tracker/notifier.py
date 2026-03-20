@@ -1,9 +1,11 @@
 """
-notifier.py - Sends price alert emails via Gmail SMTP.
+notifier.py - Sends price alert emails via SendGrid HTTP API.
+(SMTP is blocked on Render free tier — SendGrid uses HTTPS, always works)
 """
 
 import logging
-import smtplib
+import json
+import requests
 from datetime import datetime, date
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -199,10 +201,8 @@ def _build_batch_message(
 
 class Notifier:
     def __init__(self, cfg: dict):
-        self.smtp_host: str = cfg["smtp_host"]
-        self.smtp_port: int = cfg["smtp_port"]
-        self.smtp_user: str = cfg["smtp_user"]
-        self.smtp_password: str = cfg["smtp_password"]
+        self.sendgrid_key: str = cfg.get("sendgrid_api_key", "")
+        self.sender: str = cfg["smtp_user"]       # reuse as sender address
         self.recipient: str = cfg["alert_email"]
         self.currency: str = cfg["currency"]
         self.max_alerts_per_day: int = cfg["max_alerts_per_day"]
@@ -219,19 +219,41 @@ class Notifier:
             return False
         return True
 
-    def _send(self, msg: MIMEMultipart) -> bool:
+    def _send(self, subject: str, html: str, plain: str) -> bool:
+        if not self.sendgrid_key:
+            logger.error("SENDGRID_API_KEY no configurado — no se puede enviar email.")
+            return False
+        payload = {
+            "personalizations": [{"to": [{"email": self.recipient}]}],
+            "from": {"email": self.sender, "name": "Flight Tracker"},
+            "subject": subject,
+            "content": [
+                {"type": "text/plain", "value": plain},
+                {"type": "text/html",  "value": html},
+            ],
+        }
         try:
-            with smtplib.SMTP_SSL(self.smtp_host, 465, timeout=15) as server:
-                server.login(self.smtp_user, self.smtp_password)
-                server.sendmail(self.smtp_user, self.recipient, msg.as_string())
-            self._alerts_today += 1
-            logger.info(
-                "Email enviado a %s (hoy: %d/%d)",
-                self.recipient, self._alerts_today, self.max_alerts_per_day,
+            resp = requests.post(
+                "https://api.sendgrid.com/v3/mail/send",
+                headers={
+                    "Authorization": f"Bearer {self.sendgrid_key}",
+                    "Content-Type": "application/json",
+                },
+                data=json.dumps(payload),
+                timeout=15,
             )
-            return True
-        except smtplib.SMTPException as exc:
-            logger.error("Error enviando email: %s", exc)
+            if resp.status_code in (200, 202):
+                self._alerts_today += 1
+                logger.info(
+                    "Email enviado a %s via SendGrid (hoy: %d/%d)",
+                    self.recipient, self._alerts_today, self.max_alerts_per_day,
+                )
+                return True
+            else:
+                logger.error("SendGrid error %d: %s", resp.status_code, resp.text)
+                return False
+        except requests.RequestException as exc:
+            logger.error("Error enviando email via SendGrid: %s", exc)
             return False
 
     def send_alert_batch(
@@ -240,10 +262,6 @@ class Notifier:
         alerts: list[FlightResult],
         threshold: float,
     ) -> bool:
-        """
-        Envía un único email con tabla comparativa de TODAS las combinaciones,
-        resaltando en verde las que están por debajo del umbral.
-        """
         if not self._can_send():
             return False
         msg = _build_batch_message(
@@ -252,15 +270,27 @@ class Notifier:
             threshold=threshold,
             currency=self.currency,
             recipient=self.recipient,
-            sender=self.smtp_user,
+            sender=self.sender,
         )
-        return self._send(msg)
+        # Extract subject, html and plain from MIMEMultipart
+        subject = msg["Subject"]
+        plain = ""
+        html = ""
+        for part in msg.walk():
+            ct = part.get_content_type()
+            raw = part.get_payload(decode=False)
+            if not isinstance(raw, (str, bytes)):
+                continue
+            decoded = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+            if ct == "text/plain":
+                plain = decoded
+            elif ct == "text/html":
+                html = decoded
+        return self._send(subject, html, plain)
 
     def send_test_email(self) -> bool:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = "[Flight Tracker] Email de prueba — configuración correcta"
-        msg["From"] = f"Flight Tracker <{self.smtp_user}>"
-        msg["To"] = self.recipient
+        subject = "[Flight Tracker] Email de prueba — configuración correcta"
+        plain = "Flight Tracker activo. Monitorizando TFS+TFN -> MIA con múltiples combos de fechas."
         html = """\
         <html><body style="font-family:Arial,sans-serif;padding:20px;">
           <h2 style="color:#1a73e8;">&#9992; Flight Tracker activo</h2>
@@ -269,9 +299,4 @@ class Notifier:
              <strong>4 combinaciones de fechas</strong> por ciclo.</p>
           <p>Recibirás un email con tabla comparativa cuando alguna opción baje de tu umbral.</p>
         </body></html>"""
-        msg.attach(MIMEText(
-            "Flight Tracker activo. Monitorizando TFS+TFN -> MIA con múltiples combos de fechas.",
-            "plain"
-        ))
-        msg.attach(MIMEText(html, "html"))
-        return self._send(msg)
+        return self._send(subject, html, plain)
