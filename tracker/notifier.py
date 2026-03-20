@@ -221,9 +221,7 @@ class Notifier:
 
     def _send(self, msg: MIMEMultipart) -> bool:
         try:
-            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as server:
-                server.ehlo()
-                server.starttls()
+            with smtplib.SMTP_SSL(self.smtp_host, 465, timeout=15) as server:
                 server.login(self.smtp_user, self.smtp_password)
                 server.sendmail(self.smtp_user, self.recipient, msg.as_string())
             self._alerts_today += 1
