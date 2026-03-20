@@ -311,18 +311,17 @@ def main() -> None:
         google_h, kiwi_h, sky_h, avia_h,
     )
 
-    # NO ejecutamos ciclo inmediato al arrancar — los emails llegan a horas fijas
-    # (06:00 y 18:00 hora España)
+    # Primer ciclo inmediato al arrancar (así siempre hay email al desplegar)
+    run_google(cfg, conn, notifier)
+    run_aviasales(cfg, conn, notifier)
 
     # ── Programar ciclos a horas fijas (UTC) ──────────────────────────────
-    # España = UTC+2 (verano) → 06:00 ES = 04:00 UTC, 18:00 ES = 16:00 UTC
-    schedule.every().day.at("04:00").do(run_google, cfg, conn, notifier)
-    schedule.every().day.at("16:00").do(run_google, cfg, conn, notifier)
-    schedule.every().day.at("04:05").do(run_aviasales, cfg, conn, notifier)
-    schedule.every(kiwi_h).hours.do(run_kiwi, cfg, conn, notifier)
-    schedule.every(sky_h).hours.do(run_skyscanner, cfg, conn, notifier)
+    # Canarias = UTC+1 → 06:00 Canarias = 05:00 UTC, 18:00 Canarias = 17:00 UTC
+    schedule.every().day.at("05:00").do(run_google, cfg, conn, notifier)
+    schedule.every().day.at("17:00").do(run_google, cfg, conn, notifier)
+    schedule.every().day.at("05:05").do(run_aviasales, cfg, conn, notifier)
 
-    logger.info("Próximos checks → Google: 06:00 y 18:00 ES | Aviasales: 06:00 ES")
+    logger.info("Próximos checks → Google y Aviasales: 06:00 y 18:00 hora Canarias")
 
     try:
         while True:
