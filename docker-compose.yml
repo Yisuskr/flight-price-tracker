@@ -3,21 +3,12 @@ services:
     build: .
     container_name: flight-price-tracker
     restart: unless-stopped
-
-    # Mount your local .env file — secrets never bake into the image
     env_file:
       - .env
-
-    # Persist the SQLite database across container restarts
     volumes:
       - ./data:/app/data
-
-    # Optional: override config without rebuilding
-    # Uncomment the line below if you want to edit config.yaml on the host
-    # and have it reflected inside the container immediately.
-    # - ./config.yaml:/app/config.yaml:ro
-
-    # Useful for local debugging — remove for production
+      # Uncomment while editing config locally without rebuilding the image:
+      # - ./config.yaml:/app/config.yaml:ro
     logging:
       driver: "json-file"
       options:

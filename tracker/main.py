@@ -1,16 +1,3 @@
-"""
-main.py - Entry point for the Flight Price Tracker.
-
-Cuatro fuentes corren en ciclos independientes:
-  - Google Flights (SerpAPI): cada 12h
-  - Kiwi.com:                 cada 60h  (~96 llamadas/mes, límite gratuito: 500)
-  - Skyscanner (RapidAPI):    cada 72h  (~80 llamadas/mes, límite gratuito: 100)
-  - Aviasales (Travelpayouts):cada 24h  (sin límite declarado, caché ~48h)
-
-Tras cada fetch se fusionan los resultados en caché, se guardan en SQLite
-y se envía un email comparativo si alguna opción baja del umbral.
-"""
-
 import argparse
 import logging
 import os
@@ -28,16 +15,13 @@ from tracker.config import load_config
 from tracker.flight import FlightResult
 from tracker.notifier import Notifier
 from tracker.sources.aggregator import (
+    fetch_aviasales,
     fetch_google,
     fetch_kiwi,
     fetch_skyscanner,
-    fetch_aviasales,
     get_merged_results,
 )
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -46,14 +30,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("tracker.main")
 
-# ---------------------------------------------------------------------------
-# Base de datos
-# ---------------------------------------------------------------------------
+
 def _resolve_db_path() -> str:
-    """
-    Try writable locations in order. Fall back to in-memory DB (':memory:')
-    if nothing is writable (e.g. Render free tier with no disk).
-    """
     candidates = [
         Path(__file__).parent.parent / "data" / "prices.db",
         Path("/tmp/prices.db"),
@@ -61,7 +39,6 @@ def _resolve_db_path() -> str:
     for path in candidates:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            # Test that we can actually write there
             test = path.parent / ".write_test"
             test.touch()
             test.unlink()
@@ -95,7 +72,7 @@ def init_db() -> sqlite3.Connection:
         """
     )
     conn.commit()
-    logger.info("Base de datos lista en %s", db_path)
+    logger.info("Database ready at %s", db_path)
     return conn
 
 
@@ -133,35 +110,28 @@ def get_history_summary(conn: sqlite3.Connection, currency: str) -> str:
         "SELECT COUNT(*), MIN(price), MAX(price), AVG(price) FROM price_history"
     ).fetchone()
     if not row or row[0] == 0:
-        return "Sin historial de precios todavía."
+        return "No price history yet."
     count, low, high, avg = row
-    sym = "€" if currency == "EUR" else currency
+    sym = "EUR " if currency == "EUR" else f"{currency} "
     return (
-        f"Historial: {count} checks | "
-        f"Mínimo: {sym}{low:.0f} | Máximo: {sym}{high:.0f} | Media: {sym}{avg:.0f}"
+        f"History: {count} checks | "
+        f"Low: {sym}{low:.0f} | High: {sym}{high:.0f} | Average: {sym}{avg:.0f}"
     )
 
 
-# ---------------------------------------------------------------------------
-# Evaluación y alerta — se llama tras cada fetch de cualquier fuente
-# ---------------------------------------------------------------------------
 def evaluate_and_alert(
     cfg: dict,
     conn: sqlite3.Connection,
     notifier: Notifier,
     source_label: str,
 ) -> None:
-    """
-    Fusiona los resultados del caché de todas las fuentes, guarda en BD
-    y envía alerta si hay opciones por debajo del umbral.
-    """
     currency = cfg["currency"]
-    sym = "€" if currency == "EUR" else currency
-    threshold = float(cfg["price_threshold_usd"])
+    sym = "EUR " if currency == "EUR" else f"{currency} "
+    threshold = float(cfg["price_threshold"])
 
     results = get_merged_results()
     if not results:
-        logger.warning("[%s] Sin resultados tras fusionar fuentes.", source_label)
+        logger.warning("[%s] No merged results available.", source_label)
         return
 
     alerts_to_send = []
@@ -171,68 +141,96 @@ def evaluate_and_alert(
         if should_alert:
             alerts_to_send.append(flight)
         logger.info(
-            "[%s] %s->%s | sal %s vuel %s | %s%s | %s | %s | %s",
-            "ALERTA" if should_alert else "     ",
-            flight.origin, flight.destination,
-            flight.outbound_date, flight.return_date or "—",
-            sym, f"{flight.price:.0f}",
+            "[%s] %s->%s | out %s ret %s | %s%.0f | %s | %s | %s",
+            "ALERT" if should_alert else "     ",
+            flight.origin,
+            flight.destination,
+            flight.outbound_date,
+            flight.return_date or "-",
+            sym,
+            flight.price,
             flight.airline,
             flight.layovers_str(),
             getattr(flight, "source", ""),
         )
 
     if alerts_to_send:
-        logger.info(
-            "%d opción(es) por debajo del umbral. Enviando email...",
-            len(alerts_to_send),
-        )
+        logger.info("%d result(s) under threshold. Sending email.", len(alerts_to_send))
         notifier.send_alert_batch(results, alerts_to_send, threshold)
-    else:
-        # Siempre manda el resumen aunque nada baje del umbral
+    elif cfg.get("send_summary_when_no_alert", True):
         logger.info(
-            "El más barato es %s%s, por encima del umbral %s%s. Enviando resumen...",
-            sym, f"{results[0].price:.0f}", sym, f"{threshold:.0f}",
+            "Best result is %s%.0f, above threshold %s%.0f. Sending summary.",
+            sym,
+            results[0].price,
+            sym,
+            threshold,
         )
         notifier.send_alert_batch(results, [], threshold)
+    else:
+        logger.info(
+            "Best result is %s%.0f, above threshold %s%.0f. No email sent.",
+            sym,
+            results[0].price,
+            sym,
+            threshold,
+        )
 
-    logger.info(
-        "=== [%s] Ciclo completo — %d resultados fusionados ===",
-        source_label, len(results),
-    )
+    logger.info("[%s] Cycle complete with %d merged result(s).", source_label, len(results))
 
 
-# ---------------------------------------------------------------------------
-# Jobs del scheduler (uno por fuente)
-# ---------------------------------------------------------------------------
 def run_google(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
-    logger.info("=== [Google] Iniciando fetch ===")
+    if not cfg.get("serpapi_key"):
+        logger.info("[Google] Disabled because SERPAPI_KEY is not configured.")
+        return
+    logger.info("[Google] Starting fetch.")
     logger.info(get_history_summary(conn, cfg["currency"]))
     fetch_google(cfg)
     evaluate_and_alert(cfg, conn, notifier, "Google")
 
 
 def run_kiwi(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
-    logger.info("=== [Kiwi] Iniciando fetch ===")
+    if not cfg.get("kiwi_api_key"):
+        logger.info("[Kiwi] Disabled because KIWI_API_KEY is not configured.")
+        return
+    logger.info("[Kiwi] Starting fetch.")
     fetch_kiwi(cfg)
     evaluate_and_alert(cfg, conn, notifier, "Kiwi")
 
 
 def run_skyscanner(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
-    logger.info("=== [Skyscanner] Iniciando fetch ===")
+    if not cfg.get("rapidapi_key"):
+        logger.info("[Skyscanner] Disabled because RAPIDAPI_KEY is not configured.")
+        return
+    logger.info("[Skyscanner] Starting fetch.")
     fetch_skyscanner(cfg)
     evaluate_and_alert(cfg, conn, notifier, "Skyscanner")
 
 
 def run_aviasales(cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
-    logger.info("=== [Aviasales] Iniciando fetch ===")
+    if not cfg.get("aviasales_token"):
+        logger.info("[Aviasales] Disabled because AVIASALES_TOKEN is not configured.")
+        return
+    logger.info("[Aviasales] Starting fetch.")
     fetch_aviasales(cfg)
     evaluate_and_alert(cfg, conn, notifier, "Aviasales")
 
 
-# ---------------------------------------------------------------------------
-# Minimal HTTP health server — required by Render's free web service tier
-# Runs in a background thread; does not affect the tracker logic
-# ---------------------------------------------------------------------------
+SOURCE_RUNNERS = {
+    "google": run_google,
+    "kiwi": run_kiwi,
+    "skyscanner": run_skyscanner,
+    "aviasales": run_aviasales,
+}
+
+
+def _run_source(name: str, cfg: dict, conn: sqlite3.Connection, notifier: Notifier) -> None:
+    runner = SOURCE_RUNNERS.get(name)
+    if runner is None:
+        logger.warning("Unknown source in config.yaml: %s", name)
+        return
+    runner(cfg, conn, notifier)
+
+
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -240,7 +238,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"OK")
 
     def log_message(self, format, *args):  # noqa: A002
-        pass  # silence access logs
+        pass
 
 
 def _start_health_server() -> None:
@@ -248,87 +246,81 @@ def _start_health_server() -> None:
     server = HTTPServer(("0.0.0.0", port), _HealthHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    logger.info("Health server escuchando en puerto %d", port)
+    logger.info("Health server listening on port %d", port)
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Tenerife -> Miami Flight Price Tracker")
-    parser.add_argument("--test-email", action="store_true", help="Envía email de prueba y sale.")
+    parser = argparse.ArgumentParser(description="Generic flight price tracker")
+    parser.add_argument("--test-email", action="store_true", help="Send a test email and exit.")
     parser.add_argument(
-        "--check-now", action="store_true",
-        help="Ejecuta todas las fuentes inmediatamente y sale.",
+        "--check-now",
+        action="store_true",
+        help="Run all configured sources immediately and exit.",
     )
     return parser.parse_args()
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 def main() -> None:
     args = parse_args()
     cfg = load_config()
     conn = init_db()
     notifier = Notifier(cfg)
 
-    # Start health server so Render's web service tier keeps the process alive
     _start_health_server()
 
     if args.test_email:
-        logger.info("Enviando email de prueba a %s ...", cfg["alert_email"])
+        logger.info("Sending test email to %s.", cfg["alert_email"])
         ok = notifier.send_test_email()
         sys.exit(0 if ok else 1)
 
     if args.check_now:
-        logger.info("=== --check-now: ejecutando todas las fuentes ===")
-        run_google(cfg, conn, notifier)
-        run_kiwi(cfg, conn, notifier)
-        run_skyscanner(cfg, conn, notifier)
-        run_aviasales(cfg, conn, notifier)
+        logger.info("--check-now: running all sources once.")
+        for source in SOURCE_RUNNERS:
+            _run_source(source, cfg, conn, notifier)
         sys.exit(0)
 
-    # ── Intervalos por fuente ──────────────────────────────────────────────
-    google_h = int(cfg.get("check_interval_hours", 12))
+    google_h = int(cfg.get("google_interval_hours", 12))
     kiwi_h = int(cfg.get("kiwi_interval_hours", 60))
     sky_h = int(cfg.get("skyscanner_interval_hours", 72))
     avia_h = int(cfg.get("aviasales_interval_hours", 24))
 
-    sym = "€" if cfg["currency"] == "EUR" else cfg["currency"]
+    sym = "EUR " if cfg["currency"] == "EUR" else f"{cfg['currency']} "
     n_combos = (
         len(cfg["origin_airports"])
+        * len(cfg["destination_airports"])
         * len(cfg["outbound_dates"])
         * max(len(cfg.get("return_dates", [])), 1)
     )
 
     logger.info(
-        "Tracker iniciado | %d combos/ciclo | umbral: %s%s",
-        n_combos, sym, cfg["price_threshold_usd"],
+        "Tracker started | %d combo(s) per source | threshold: %s%s",
+        n_combos,
+        sym,
+        cfg["price_threshold"],
     )
     logger.info(
-        "Intervalos → Google: %dh | Kiwi: %dh | Skyscanner: %dh | Aviasales: %dh",
-        google_h, kiwi_h, sky_h, avia_h,
+        "Intervals | Google: %dh | Kiwi: %dh | Skyscanner: %dh | Aviasales: %dh",
+        google_h,
+        kiwi_h,
+        sky_h,
+        avia_h,
     )
 
-    # Primer ciclo inmediato al arrancar (así siempre hay email al desplegar)
-    run_google(cfg, conn, notifier)
-    run_aviasales(cfg, conn, notifier)
+    for source in cfg.get("initial_sources", []):
+        _run_source(source, cfg, conn, notifier)
 
-    # ── Programar ciclos a horas fijas (UTC) ──────────────────────────────
-    # Canarias = UTC+1 → 06:00 Canarias = 05:00 UTC, 18:00 Canarias = 17:00 UTC
-    schedule.every().day.at("05:00").do(run_google, cfg, conn, notifier)
-    schedule.every().day.at("17:00").do(run_google, cfg, conn, notifier)
-    schedule.every().day.at("05:05").do(run_aviasales, cfg, conn, notifier)
-
-    logger.info("Próximos checks → Google y Aviasales: 06:00 y 18:00 hora Canarias")
+    schedule.every(google_h).hours.do(run_google, cfg, conn, notifier)
+    schedule.every(kiwi_h).hours.do(run_kiwi, cfg, conn, notifier)
+    schedule.every(sky_h).hours.do(run_skyscanner, cfg, conn, notifier)
+    schedule.every(avia_h).hours.do(run_aviasales, cfg, conn, notifier)
+    logger.info("Checks scheduled using hour intervals from config.yaml.")
 
     try:
         while True:
             schedule.run_pending()
             time.sleep(60)
     except KeyboardInterrupt:
-        logger.info("Tracker detenido por el usuario.")
+        logger.info("Tracker stopped by user.")
     finally:
         conn.close()
 

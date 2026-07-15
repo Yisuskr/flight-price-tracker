@@ -1,203 +1,259 @@
-# ✈ Flight Price Tracker — Miami → Tenerife
+# Flight Price Tracker
 
-A 24/7 flight price monitoring bot that watches **Miami (MIA) → Tenerife (TFS + TFN)** on Google Flights and sends you an email the moment the price drops below your threshold. Monitors both Tenerife airports simultaneously and shows prices in EUR.
+A configurable flight price tracker that watches the routes and dates you choose, stores price history in SQLite, and sends email alerts when a flight drops below your threshold.
 
-Built with Python, SerpAPI, Gmail SMTP, and Docker. Deployable for free on Railway.
-
----
+It can run once on demand or stay running continuously with independent schedules for each flight data source.
 
 ## Features
 
-- Checks Google Flights on a configurable interval (default: every 6 hours)
-- Searches **both Tenerife airports simultaneously**: TFS (Sur / Reina Sofia) and TFN (Norte / Los Rodeos)
-- Supports one-way and round-trip searches
-- Prices in **EUR** by default (configurable)
-- Sends a beautifully formatted HTML email when the price drops below your limit, showing which airport is cheaper
-- Throttles alerts (configurable max emails per day) to avoid inbox spam
-- Stores full price history in a local SQLite database
-- Runs in Docker — one command to start, runs forever
-
----
+- Track any route supported by IATA airport codes.
+- Search one or many origins, one or many destinations, and multiple travel dates.
+- Supports one-way and round-trip searches.
+- Sends email through SendGrid over HTTPS or Gmail SMTP locally.
+- Uses optional flight data sources: Google Flights via SerpAPI, Kiwi, Skyscanner, and Aviasales.
+- Stores price history in `data/prices.db`.
+- Runs locally with Python or Docker.
+- Deployable to Render with `render.yaml`.
 
 ## Project Structure
 
-```
+```text
 flight-price-tracker/
-├── tracker/
-│   ├── __init__.py
-│   ├── main.py        # Scheduler loop, CLI entry point, SQLite history
-│   ├── flight.py      # Google Flights data fetching via SerpAPI
-│   ├── notifier.py    # Gmail SMTP email alerts
-│   └── config.py      # Loads .env + config.yaml
-├── config.yaml        # Your travel dates, price threshold, intervals
-├── .env.example       # Credentials template (copy to .env)
-├── Dockerfile
-├── docker-compose.yml
-└── requirements.txt
+|-- tracker/
+|   |-- main.py              # CLI, scheduler, SQLite history
+|   |-- config.py            # Loads .env and config.yaml
+|   |-- flight.py            # Shared flight result model and SerpAPI source
+|   |-- notifier.py          # SendGrid or SMTP email delivery
+|   `-- sources/
+|       |-- aggregator.py    # Merges source results
+|       |-- aviasales.py
+|       |-- kiwi.py
+|       `-- skyscanner.py
+|-- config.yaml              # Public route and alert configuration
+|-- .env.example             # Secret/API key template
+|-- Dockerfile
+|-- docker-compose.yml
+|-- render.yaml
+`-- requirements.txt
 ```
 
----
+## Requirements
 
-## Prerequisites
-
-| Service | What you need | Free tier |
-|---------|--------------|-----------|
-| [SerpAPI](https://serpapi.com/) | API key | 100 searches/month |
-| Gmail | Account + App Password | Free |
-| [Railway](https://railway.app/) | Account | $5 free credit/month |
-
----
+- Python 3.12+ or Docker.
+- Email delivery credentials:
+  - SendGrid API key for hosted deployments.
+  - Gmail app password for local SMTP.
+- At least one flight data API key:
+  - SerpAPI for Google Flights.
+  - Kiwi Tequila API.
+  - RapidAPI key for Skyscanner.
+  - Aviasales / Travelpayouts token.
 
 ## Quick Start
 
-### 1. Clone the repo
+Clone the repository:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/flight-price-tracker.git
+git clone https://github.com/Yisuskr/flight-price-tracker.git
 cd flight-price-tracker
 ```
 
-### 2. Set up credentials
+Create your local secrets file:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your real values:
+Fill `.env`:
 
 ```env
+EMAIL_PROVIDER=sendgrid
+SENDGRID_API_KEY=your_sendgrid_api_key_here
+
+# For local Gmail SMTP instead:
+# EMAIL_PROVIDER=smtp
+# SMTP_HOST=smtp.gmail.com
+# SMTP_PORT=465
+# SMTP_USER=your_gmail@gmail.com
+# SMTP_PASSWORD=your_gmail_app_password_here
+
+SENDER_EMAIL=verified_sender@example.com
+SENDER_NAME=Flight Tracker
+
 SERPAPI_KEY=your_serpapi_key_here
-SMTP_USER=your.gmail@gmail.com
-SMTP_PASSWORD=your_16_char_app_password
+KIWI_API_KEY=
+RAPIDAPI_KEY=
+AVIASALES_TOKEN=
 ```
 
-> **Gmail App Password:** Go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords), create a new app password, and paste the 16-character code (no spaces) as `SMTP_PASSWORD`. You must have 2-Step Verification enabled.
+For SendGrid, `SENDER_EMAIL` must be a verified sender in SendGrid.
+For Gmail SMTP, `SENDER_EMAIL` should usually match `SMTP_USER`.
 
-### 3. Configure your alert
+Useful links:
+
+- SendGrid API keys: https://app.sendgrid.com/settings/api_keys
+- SendGrid sender authentication: https://app.sendgrid.com/settings/sender_auth
+- Gmail app passwords: https://myaccount.google.com/apppasswords
 
 Edit `config.yaml`:
 
 ```yaml
-alert_email: "your@email.com"       # Where alerts are sent
-price_threshold_usd: 600             # Alert when price <= this
-outbound_date: "2026-06-15"          # Your travel date
-return_date: "2026-06-30"            # null for one-way
-check_interval_hours: 6              # How often to check
-max_alerts_per_day: 3                # Max emails per day
+alert_email: "recipient@example.com"
+price_threshold: 650
+currency: "EUR"
+
+origins:
+  - "MAD"
+destinations:
+  - "JFK"
+
+outbound_dates:
+  - "2026-04-27"
+return_dates:
+  - "2026-05-08"
+
+adults: 1
+carry_on_bags: 0
+checked_bags: 0
+
+max_alerts_per_day: 3
+send_summary_when_no_alert: true
 ```
 
-### 4. Run locally with Docker
+The tracker checks every combination:
 
-```bash
-# Build and start (runs 24/7 in background)
-docker compose up -d
-
-# View live logs
-docker compose logs -f
-
-# Stop
-docker compose down
+```text
+origins x destinations x outbound_dates x return_dates
 ```
 
-### 5. Test your setup
+## Run Once
+
+With Docker:
 
 ```bash
-# Send a test email to verify SMTP is working
-docker compose run --rm tracker --test-email
-
-# Run a single price check right now
 docker compose run --rm tracker --check-now
 ```
 
----
-
-## Deploy to Railway (free, 24/7)
-
-Railway gives you a free hobby plan that keeps your container running continuously.
-
-### Steps
-
-1. Push your code to GitHub (make sure `.env` is in `.gitignore` — it already is).
-
-2. Go to [railway.app](https://railway.app/) and create a new project:
-   - **New Project → Deploy from GitHub repo**
-   - Select your `flight-price-tracker` repository
-
-3. Add environment variables in Railway's dashboard:
-   - Go to your service → **Variables** tab
-   - Add `SERPAPI_KEY`, `SMTP_USER`, `SMTP_PASSWORD`
-
-4. Railway auto-detects the `Dockerfile` and deploys it. Your tracker starts immediately.
-
-5. To persist the SQLite database across redeploys, add a **Volume** in Railway:
-   - Service → **Volumes** → Add volume → mount path `/app/data`
-
-That's it. Your tracker is now live 24/7 at zero cost.
-
----
-
-## Running Without Docker
+Without Docker:
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Copy and fill credentials
-cp .env.example .env
-
-# Send test email
-python -m tracker.main --test-email
-
-# Run single check
 python -m tracker.main --check-now
+```
 
-# Run continuously
+## Run Continuously
+
+With Docker:
+
+```bash
+docker compose up -d
+docker compose logs -f
+```
+
+Without Docker:
+
+```bash
 python -m tracker.main
 ```
 
----
+Continuous mode uses these intervals from `config.yaml`:
 
-## Price History
-
-Every check is recorded in `data/prices.db` (SQLite). You can query it directly:
-
-```bash
-sqlite3 data/prices.db "SELECT checked_at, airline, price_usd, stops FROM price_history ORDER BY price_usd ASC LIMIT 10;"
+```yaml
+google_interval_hours: 8
+kiwi_interval_hours: 60
+skyscanner_interval_hours: 72
+aviasales_interval_hours: 24
 ```
 
----
+Leave an API key blank in `.env` to disable that source.
+
+## Email Providers
+
+Hosted deployment, such as Render:
+
+```env
+EMAIL_PROVIDER=sendgrid
+SENDGRID_API_KEY=your_sendgrid_api_key_here
+SENDER_EMAIL=verified_sender@example.com
+SENDER_NAME=Flight Tracker
+```
+
+Local Gmail SMTP:
+
+```env
+EMAIL_PROVIDER=smtp
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_USER=your_gmail@gmail.com
+SMTP_PASSWORD=your_gmail_app_password_here
+SENDER_EMAIL=your_gmail@gmail.com
+SENDER_NAME=Flight Tracker
+```
+
+Gmail SMTP needs a Google app password, not your normal Gmail password.
+
+## Test Email
+
+```bash
+docker compose run --rm tracker --test-email
+```
+
+or:
+
+```bash
+python -m tracker.main --test-email
+```
+
+## Deploy to Render
+
+1. Push this repository to GitHub.
+2. Create a new Render service from the GitHub repository.
+3. Render will use `render.yaml` and the Dockerfile.
+4. Add environment variables in Render:
+   - `EMAIL_PROVIDER=sendgrid`
+   - `SENDGRID_API_KEY`
+   - `SENDER_EMAIL`
+   - `SENDER_NAME`
+   - Any flight source keys you want to use.
+5. Optional: add a persistent disk mounted at `/app/data` if you want SQLite history to survive redeploys.
 
 ## Configuration Reference
 
 | Key | Description | Default |
-|-----|-------------|---------|
+| --- | --- | --- |
 | `alert_email` | Recipient email for alerts | required |
-| `price_threshold_usd` | Alert when price ≤ this | required |
-| `outbound_date` | Departure date (YYYY-MM-DD) | required |
-| `return_date` | Return date or `null` for one-way | `null` |
-| `origin` | IATA origin code | `MIA` |
-| `destination` | IATA destination code | `TFS` |
-| `adults` | Number of passengers | `1` |
-| `currency` | Price currency | `USD` |
-| `check_interval_hours` | Hours between checks | `6` |
-| `max_alerts_per_day` | Max alert emails per day | `3` |
-| `smtp_host` | SMTP server | `smtp.gmail.com` |
-| `smtp_port` | SMTP port | `587` |
+| `price_threshold` | Alert when price is less than or equal to this value | required |
+| `currency` | Price currency requested from APIs | `EUR` |
+| `origins` | List of origin IATA airport codes | required |
+| `destinations` | List of destination IATA airport codes | required |
+| `outbound_dates` | List of departure dates, `YYYY-MM-DD` | required |
+| `return_dates` | List of return dates; empty list means one-way | `[]` |
+| `adults` | Number of adult passengers | `1` |
+| `carry_on_bags` | Carry-on bags requested where supported | `0` |
+| `checked_bags` | Checked bags requested where supported | `0` |
+| `max_alerts_per_day` | Maximum emails sent per day | `3` |
+| `send_summary_when_no_alert` | Send a summary even if no price is below threshold | `true` |
+| `google_interval_hours` | Continuous interval for SerpAPI / Google Flights | `8` |
+| `kiwi_interval_hours` | Continuous interval for Kiwi | `60` |
+| `skyscanner_interval_hours` | Continuous interval for Skyscanner | `72` |
+| `aviasales_interval_hours` | Continuous interval for Aviasales | `24` |
+| `initial_sources` | Sources to run immediately at startup | `["google", "aviasales"]` |
 
----
+## Price History
 
-## SerpAPI Free Tier Usage
+Every check is stored in SQLite:
 
-The free tier includes **100 searches/month**. At the default 6-hour interval that's ~120 searches/month — slightly over the free limit. Adjust the interval to stay within quota:
+```bash
+sqlite3 data/prices.db "SELECT checked_at, origin, destination, airline, price, currency, source FROM price_history ORDER BY checked_at DESC LIMIT 10;"
+```
 
-| Interval | Searches/month |
-|----------|---------------|
-| 6 hours | ~120 (slightly over free tier) |
-| 8 hours | ~90 |
-| 12 hours | ~60 |
-| 24 hours | ~30 |
+## Notes
 
----
+- API providers have different quotas and response shapes.
+- Some sources may return no data for low-traffic routes.
+- Use `EMAIL_PROVIDER=sendgrid` for hosted deployments because many free hosts block SMTP ports.
+- Use `EMAIL_PROVIDER=smtp` with a Gmail app password for local runs from your own computer.
+- `.env` is ignored by Git and should never be committed.
 
 ## License
 

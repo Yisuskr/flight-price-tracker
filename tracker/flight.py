@@ -16,12 +16,6 @@ logger = logging.getLogger(__name__)
 
 SERPAPI_ENDPOINT = "https://serpapi.com/search"
 
-AIRPORT_NAMES = {
-    "MIA": "Miami",
-    "TFS": "Tenerife Sur",
-    "TFN": "Tenerife Norte",
-}
-
 # Source identifier for results from this module
 SOURCE_NAME = "Google Flights"
 
@@ -59,10 +53,10 @@ class FlightResult:
         return self.stops == 0
 
     def origin_name(self) -> str:
-        return AIRPORT_NAMES.get(self.origin, self.origin)
+        return self.origin
 
     def destination_name(self) -> str:
-        return AIRPORT_NAMES.get(self.destination, self.destination)
+        return self.destination
 
     def layovers_str(self) -> str:
         if not self.layovers:
@@ -227,7 +221,7 @@ def fetch_cheapest_flight(
 
 def fetch_all_combinations(
     origin_airports: list[str],
-    destination: str,
+    destination_airports: list[str],
     outbound_dates: list[str],
     return_dates: list[str],
     adults: int,
@@ -237,19 +231,15 @@ def fetch_all_combinations(
     checked_bags: int = 0,
 ) -> list[FlightResult]:
     """
-    Busca TODAS las combinaciones de:
-      - aeropuertos de origen (TFS, TFN)
-      - fechas de salida    (27 abr, 28 abr)
-      - fechas de vuelta    (8 may, 9 may)
-
-    Devuelve todos los resultados encontrados ordenados por precio ascendente.
+    Searches every configured combination of origins, destinations, outbound
+    dates, and return dates. Returns results sorted by price ascending.
     """
     results = []
     return_list = return_dates if return_dates else [None]
-    combos = list(product(origin_airports, outbound_dates, return_list))
+    combos = list(product(origin_airports, destination_airports, outbound_dates, return_list))
     logger.info("Lanzando %d combinaciones de búsqueda...", len(combos))
 
-    for origin, outbound, return_date in combos:
+    for origin, destination, outbound, return_date in combos:
         result = fetch_cheapest_flight(
             origin=origin,
             destination=destination,

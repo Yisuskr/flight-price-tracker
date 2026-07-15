@@ -1,75 +1,46 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# Flight Price Tracker — User Configuration
-# ─────────────────────────────────────────────────────────────────────────────
-# Edit the values below to match your travel plans and alert preferences.
-# Secrets (API key, email password) go in .env — NOT here.
+# Flight Price Tracker configuration
+#
+# Put secrets in .env, not here. This file is meant to be committed and edited
+# by each person who wants to track their own routes.
 
-# ---------------------------------------------------------------------------
-# Alert destination
-# ---------------------------------------------------------------------------
+# Email that receives alerts and summaries.
 alert_email: "recipient@example.com"
 
-# ---------------------------------------------------------------------------
-# Price threshold
-# ---------------------------------------------------------------------------
-# Recibirás una alerta cuando el precio más barato encontrado sea <= este valor (en EUR).
-# Este precio es por persona, ida y vuelta, sin equipaje.
-price_threshold_usd: 650
+# Alert when a result is equal to or cheaper than this amount in `currency`.
+price_threshold: 650
+currency: "EUR"
 
-# ---------------------------------------------------------------------------
-# Fechas de viaje — el tracker probará TODAS las combinaciones posibles
-# ---------------------------------------------------------------------------
-# Días de salida (desde Tenerife hacia Miami)
+# Route search.
+# Use IATA airport codes. You can add one or many origins/destinations.
+origins:
+  - "MAD"
+destinations:
+  - "JFK"
+
+# Travel dates. The tracker checks every combination:
+# origins x destinations x outbound_dates x return_dates.
 outbound_dates:
   - "2026-04-27"
-  - "2026-04-28"
-
-# Días de vuelta (desde Miami de vuelta a Tenerife)
 return_dates:
   - "2026-05-08"
-  - "2026-05-09"
 
-# ---------------------------------------------------------------------------
-# Parámetros de búsqueda
-# ---------------------------------------------------------------------------
-# Origen: Tenerife (busca en TFS y TFN automáticamente)
-# Destino: Miami International Airport
-origin_airports:
-  - "TFS"   # Tenerife Sur — Reina Sofia
-  - "TFN"   # Tenerife Norte — Los Rodeos
-destination: "MIA"   # Miami International Airport
-
+# Passengers and bags.
 adults: 1
-currency: "EUR"
-# Sin equipaje de bodega (solo equipaje de mano)
 carry_on_bags: 0
 checked_bags: 0
 
-# ---------------------------------------------------------------------------
-# Monitorización
-# ---------------------------------------------------------------------------
-# Intervalo por fuente (en horas). Cada fuente corre en su propio ciclo
-# para respetar los límites gratuitos de cada API.
-#
-#   SerpAPI (Google Flights): 100 llamadas/mes gratis
-#     → cada 12h usa ~240/mes (se agota a mitad de mes, luego solo Kiwi/Sky/Avia)
-#   Kiwi.com: 500 llamadas/mes gratis
-#     → cada 60h usa ~96/mes ✅
-#   Skyscanner (RapidAPI): ~100 llamadas/mes gratis
-#     → cada 72h usa ~80/mes ✅
-#   Aviasales (Travelpayouts): sin límite declarado (~1000 req/h)
-#     → cada 24h, la caché se actualiza ~cada 48h ✅
-#
-check_interval_hours: 12        # Google Flights (SerpAPI)
-kiwi_interval_hours: 60         # Kiwi.com (Tequila API)
-skyscanner_interval_hours: 72   # Skyscanner (RapidAPI)
-aviasales_interval_hours: 24    # Aviasales (Travelpayouts)
-
-# Máximo de emails de alerta al día para no saturar el buzón.
+# Email behavior.
 max_alerts_per_day: 3
+send_summary_when_no_alert: true
 
-# ---------------------------------------------------------------------------
-# SMTP — no cambiar si usas Gmail
-# ---------------------------------------------------------------------------
-smtp_host: "smtp.gmail.com"
-smtp_port: 587
+# Continuous mode intervals, in hours.
+# Leave API keys blank in .env to disable a source.
+google_interval_hours: 8
+kiwi_interval_hours: 60
+skyscanner_interval_hours: 72
+aviasales_interval_hours: 24
+
+# Sources to run immediately when the app starts in continuous mode.
+initial_sources:
+  - "google"
+  - "aviasales"

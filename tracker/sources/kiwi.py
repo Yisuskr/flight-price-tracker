@@ -151,7 +151,7 @@ def fetch_cheapest_kiwi(
 
 def fetch_all_combinations_kiwi(
     origin_airports: list[str],
-    destination: str,
+    destination_airports: list[str],
     outbound_dates: list[str],
     return_dates: list[str],
     adults: int,
@@ -159,15 +159,15 @@ def fetch_all_combinations_kiwi(
     kiwi_api_key: str,
 ) -> list[FlightResult]:
     """
-    Searches all combinations of origins x outbound_dates x return_dates via Kiwi.
+    Searches all combinations of origins x destinations x outbound_dates x return_dates via Kiwi.
     Returns results sorted by price ascending.
     """
     results = []
     return_list = return_dates if return_dates else [None]
-    combos = list(product(origin_airports, outbound_dates, return_list))
+    combos = list(product(origin_airports, destination_airports, outbound_dates, return_list))
     logger.info("Kiwi: lanzando %d combinaciones...", len(combos))
 
-    for origin, outbound, return_date in combos:
+    for origin, destination, outbound, return_date in combos:
         result = fetch_cheapest_kiwi(
             origin=origin,
             destination=destination,

@@ -8,7 +8,7 @@ independently at different intervals:
   - Skyscanner (RapidAPI):         every 72h  (~80 calls/month, within 100 free)
   - Aviasales (Travelpayouts):     every 24h  (no declared limit, cache refreshes ~48h)
 
-Deduplication: for the same (origin, outbound_date, return_date, airline)
+Deduplication: for the same (origin, destination, outbound_date, return_date, airline)
 keep only the cheapest result across all sources.
 """
 
@@ -37,7 +37,7 @@ _latest: dict[str, list[FlightResult]] = {
 def _base_kwargs(cfg: dict) -> dict:
     return dict(
         origin_airports=cfg["origin_airports"],
-        destination=cfg["destination"],
+        destination_airports=cfg["destination_airports"],
         outbound_dates=cfg["outbound_dates"],
         return_dates=cfg.get("return_dates", []),
         adults=cfg["adults"],
@@ -47,12 +47,12 @@ def _base_kwargs(cfg: dict) -> dict:
 
 def _dedup(results: list[FlightResult]) -> list[FlightResult]:
     """
-    Deduplicates by (origin, outbound_date, return_date, airline).
+    Deduplicates by (origin, destination, outbound_date, return_date, airline).
     Keeps cheapest per unique combo, sorted by price ascending.
     """
     best: dict[tuple, FlightResult] = {}
     for r in results:
-        key = (r.origin, r.outbound_date, r.return_date or "", r.airline.lower())
+        key = (r.origin, r.destination, r.outbound_date, r.return_date or "", r.airline.lower())
         if key not in best or r.price < best[key].price:
             best[key] = r
     return sorted(best.values(), key=lambda r: r.price)

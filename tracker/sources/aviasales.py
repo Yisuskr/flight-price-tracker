@@ -6,7 +6,7 @@ Docs: https://support.travelpayouts.com/hc/en-us/articles/360027634791
 
 Free tier: no declared call limit (~1000 req/hour).
 Note: returns cached data from the last ~48h of real user searches.
-      For low-traffic routes (e.g. TFS→MIA) the cache may occasionally be empty.
+      For low-traffic routes, the cache may occasionally be empty.
 
 Set AVIASALES_TOKEN in your .env to enable this source.
 Get your token at: https://app.travelpayouts.com/profile/api-token
@@ -177,7 +177,7 @@ def fetch_cheapest_aviasales(
 
 def fetch_all_combinations_aviasales(
     origin_airports: list[str],
-    destination: str,
+    destination_airports: list[str],
     outbound_dates: list[str],
     return_dates: list[str],
     adults: int,
@@ -185,16 +185,16 @@ def fetch_all_combinations_aviasales(
     token: str,
 ) -> list[FlightResult]:
     """
-    Searches all combinations of origins x outbound_dates x return_dates
+    Searches all combinations of origins x destinations x outbound_dates x return_dates
     via the Aviasales/Travelpayouts API.
     Returns all results sorted by price ascending.
     """
     return_list = return_dates if return_dates else [None]
-    combos = list(product(origin_airports, outbound_dates, return_list))
+    combos = list(product(origin_airports, destination_airports, outbound_dates, return_list))
     logger.info("[Aviasales] Lanzando %d combinaciones...", len(combos))
 
     all_results: list[FlightResult] = []
-    for origin, outbound, return_date in combos:
+    for origin, destination, outbound, return_date in combos:
         results = fetch_cheapest_aviasales(
             origin=origin,
             destination=destination,

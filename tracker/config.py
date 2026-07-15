@@ -1,7 +1,3 @@
-"""
-config.py - Loads settings from .env (secrets) and config.yaml (user preferences).
-"""
-
 import os
 import yaml
 from pathlib import Path
@@ -21,52 +17,97 @@ def _require_env(key: str) -> str:
     return value
 
 
+def _as_list(value, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return value
+    raise ValueError(f"'{field_name}' must be a string or a list of strings.")
+
+
 def load_config() -> dict:
-    """
-    Returns a merged config dict combining .env secrets and config.yaml settings.
-    """
     config_path = ROOT / "config.yaml"
     if not config_path.exists():
         raise FileNotFoundError(
             f"config.yaml not found at {config_path}. "
-            "Copy .env.example to .env and fill in your settings."
+            "Create config.yaml and copy .env.example to .env."
         )
 
-    with open(config_path, "r") as f:
-        cfg = yaml.safe_load(f)
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
 
-    # Inject secrets from environment
-    cfg["serpapi_key"] = _require_env("SERPAPI_KEY")
-    cfg["smtp_user"] = _require_env("SMTP_USER")
-    cfg["smtp_password"] = _require_env("SMTP_PASSWORD")
-    # Optional additional source keys (sources silently disabled if not set)
+    cfg["email_provider"] = os.getenv("EMAIL_PROVIDER", "sendgrid").strip().lower()
+    cfg["sender_email"] = os.getenv("SENDER_EMAIL", "")
+    cfg["sender_name"] = os.getenv("SENDER_NAME", "Flight Tracker")
+    if not cfg["sender_email"]:
+        raise EnvironmentError(
+            "Required environment variable 'SENDER_EMAIL' is not set. "
+        )
+    if cfg["email_provider"] == "sendgrid":
+        cfg["sendgrid_api_key"] = _require_env("SENDGRID_API_KEY")
+    elif cfg["email_provider"] in {"smtp", "gmail"}:
+        cfg["smtp_host"] = os.getenv("SMTP_HOST", "smtp.gmail.com")
+        cfg["smtp_port"] = int(os.getenv("SMTP_PORT", "465"))
+        cfg["smtp_user"] = _require_env("SMTP_USER")
+        cfg["smtp_password"] = _require_env("SMTP_PASSWORD")
+    else:
+        raise ValueError(
+            "EMAIL_PROVIDER must be either 'sendgrid' or 'smtp'. "
+            "Use 'smtp' for Gmail/local app-password sending."
+        )
+
+    # Flight source credentials. Empty values simply disable that source.
+    cfg["serpapi_key"] = os.getenv("SERPAPI_KEY", "")
     cfg["kiwi_api_key"] = os.getenv("KIWI_API_KEY", "")
     cfg["rapidapi_key"] = os.getenv("RAPIDAPI_KEY", "")
     cfg["aviasales_token"] = os.getenv("AVIASALES_TOKEN", "")
-    cfg["sendgrid_api_key"] = os.getenv("SENDGRID_API_KEY", "")
 
-    # Support both old single-date keys and new list keys for backward compat
+    # Convenience aliases for single-route configs.
     if "outbound_date" in cfg and "outbound_dates" not in cfg:
         cfg["outbound_dates"] = [cfg["outbound_date"]]
     if "return_date" in cfg and "return_dates" not in cfg:
         cfg["return_dates"] = [cfg["return_date"]] if cfg.get("return_date") else []
+    if "origins" in cfg:
+        cfg["origin_airports"] = _as_list(cfg["origins"], "origins")
+    elif "origin_airports" in cfg:
+        cfg["origin_airports"] = _as_list(cfg["origin_airports"], "origin_airports")
+    elif "origin" in cfg:
+        cfg["origin_airports"] = _as_list(cfg["origin"], "origin")
 
-    # Validate required fields
-    required = ["alert_email", "price_threshold_usd", "outbound_dates", "check_interval_hours"]
+    if "destinations" in cfg:
+        cfg["destination_airports"] = _as_list(cfg["destinations"], "destinations")
+    elif "destination_airports" in cfg:
+        cfg["destination_airports"] = _as_list(cfg["destination_airports"], "destination_airports")
+    elif "destination" in cfg:
+        cfg["destination_airports"] = _as_list(cfg["destination"], "destination")
+
+    required = [
+        "alert_email",
+        "price_threshold",
+        "outbound_dates",
+        "origin_airports",
+        "destination_airports",
+    ]
     for field in required:
         if not cfg.get(field):
             raise ValueError(f"Missing required field '{field}' in config.yaml.")
 
-    # Defaults
+    cfg["outbound_dates"] = _as_list(cfg["outbound_dates"], "outbound_dates")
+    cfg["return_dates"] = _as_list(cfg.get("return_dates", []), "return_dates")
+
     cfg.setdefault("return_dates", [])
     cfg.setdefault("currency", "EUR")
     cfg.setdefault("adults", 1)
     cfg.setdefault("carry_on_bags", 0)
     cfg.setdefault("checked_bags", 0)
-    cfg.setdefault("smtp_host", "smtp.gmail.com")
-    cfg.setdefault("smtp_port", 587)
-    cfg.setdefault("origin_airports", ["TFS", "TFN"])
-    cfg.setdefault("destination", "MIA")
     cfg.setdefault("max_alerts_per_day", 3)
+    cfg.setdefault("send_summary_when_no_alert", True)
+    cfg.setdefault("google_interval_hours", 12)
+    cfg.setdefault("kiwi_interval_hours", 60)
+    cfg.setdefault("skyscanner_interval_hours", 72)
+    cfg.setdefault("aviasales_interval_hours", 24)
+    cfg.setdefault("initial_sources", ["google", "aviasales"])
 
     return cfg

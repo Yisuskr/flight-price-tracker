@@ -5,11 +5,19 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     envVars:
+      - key: EMAIL_PROVIDER
+        value: sendgrid
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDER_EMAIL
+        sync: false
+      - key: SENDER_NAME
+        sync: false
       - key: SERPAPI_KEY
         sync: false
-      - key: SMTP_USER
+      - key: KIWI_API_KEY
         sync: false
-      - key: SMTP_PASSWORD
+      - key: RAPIDAPI_KEY
         sync: false
       - key: AVIASALES_TOKEN
         sync: false
